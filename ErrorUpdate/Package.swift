@@ -5,11 +5,19 @@ import PackageDescription
 
 let package = Package(
     name: "ErrorUpdate",
+    platforms: [
+        .macOS(.v13),
+    ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "ErrorUpdate",
             targets: ["ErrorUpdate"]
+        ),
+        // Command-line helper for generating signing keys and release manifests.
+        .executable(
+            name: "errorupdate-tool",
+            targets: ["ErrorUpdateTool"]
         ),
     ],
     targets: [
@@ -17,6 +25,12 @@ let package = Package(
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "ErrorUpdate",
+            swiftSettings: [
+                .enableUpcomingFeature("ApproachableConcurrency"),
+            ],
+        ),
+        .executableTarget(
+            name: "ErrorUpdateTool",
             swiftSettings: [
                 .enableUpcomingFeature("ApproachableConcurrency"),
             ],

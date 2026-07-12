@@ -11,14 +11,13 @@ import Foundation
         return dir
     }
 
-    private func makeReport(contentHash: String = "abc123", count: Int = 1) -> ErrorReport {
+    private func makeReport(contentHash: String = "abc123", timestamp: Date = Date()) -> ErrorReport {
         ErrorReport(
-            contentHash: contentHash,
-            count: count,
             errorMessage: "Test error",
             stackTrace: ["frame1", "frame2", "frame3", "frame4", "frame5"],
             appVersion: "1.0.0",
-            osVersion: ProcessInfo.processInfo.operatingSystemVersionString
+            contentHash: contentHash,
+            timestamp: timestamp
         )
     }
 
@@ -31,14 +30,9 @@ import Foundation
         let store = try ReportStore(directory: dir)
         let report = makeReport()
 
-        // Save first time
-        store.save(report)
-        // Wait for async save to complete
-        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
-
+        await save(report, to: store)
         // Save second time (same contentHash)
-        store.save(report)
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await save(report, to: store)
 
         let saved = store.fetchAll()
         #expect(saved.count == 1, "Expected exactly one report, got \(saved.count)")
@@ -52,12 +46,9 @@ import Foundation
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let store = try ReportStore(directory: dir)
-        let report1 = makeReport(contentHash: "hash1")
-        let report2 = makeReport(contentHash: "hash2")
 
-        store.save(report1)
-        store.save(report2)
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await save(makeReport(contentHash: "hash1"), to: store)
+        await save(makeReport(contentHash: "hash2"), to: store)
 
         let saved = store.fetchAll()
         #expect(saved.count == 2)
@@ -71,24 +62,15 @@ import Foundation
 
         let store = try ReportStore(directory: dir)
 
-        // Create a report with a timestamp older than 24h
-        var report = makeReport()
-        report.timestamp = Date().addingTimeInterval(-86400 - 10) // 24h + 10s ago
-        report.id = UUID()
-        try {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(report)
-            let fileURL = dir.appendingPathComponent("\(report.id.uuidString).json")
-            try data.write(to: fileURL)
-        }()
-
-        try await Task.sleep(nanoseconds: 100_000_000)
+        // Save a report with a timestamp older than 24h directly to disk
+        let oldReport = makeReport(timestamp: Date().addingTimeInterval(-86400 - 10))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(oldReport)
+        try data.write(to: dir.appendingPathComponent("\(oldReport.id.uuidString).json"))
 
         // Now save a new report with the same contentHash
-        let newReport = makeReport()
-        store.save(newReport)
-        try await Task.sleep(nanoseconds: 300_000_000)
+        await save(makeReport(), to: store)
 
         let saved = store.fetchAll()
         #expect(saved.count == 2, "Expected 2 entries (old + new), got \(saved.count)")
@@ -102,13 +84,22 @@ import Foundation
 
         let store = try ReportStore(directory: dir)
         let report = makeReport()
-        store.save(report)
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await save(report, to: store)
 
-        store.markAsSent(report.id)
-        try await Task.sleep(nanoseconds: 200_000_000)
+        await withCheckedContinuation { continuation in
+            store.markAsSent(report.id) { continuation.resume() }
+        }
 
         let saved = store.fetchAll()
         #expect(saved.count == 0)
+    }
+
+    // MARK: - Helpers
+
+    /// Saves and waits for the asynchronous write to complete.
+    private func save(_ report: ErrorReport, to store: ReportStore) async {
+        await withCheckedContinuation { continuation in
+            store.save(report) { continuation.resume() }
+        }
     }
 }

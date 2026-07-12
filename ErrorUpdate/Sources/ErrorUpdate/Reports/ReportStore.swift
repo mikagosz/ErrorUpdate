@@ -1,51 +1,47 @@
 import Foundation
 
-/// Manages persistence and retrieval of error reports using JSON-lines files.
-public class ReportStore {
+/// Manages persistence and retrieval of error reports as JSON files
+/// (one file per report, named by the report's UUID).
+public final class ReportStore: @unchecked Sendable {
 
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(label: "com.errorupdate.reportstore.sync")
     private let reportsDirectory: URL
 
+    /// Reports with the same `contentHash` within this window are merged
+    /// into a single entry with an incremented `count`.
+    private let deduplicationWindow: TimeInterval = 86_400 // 24 h
+
     enum StoreError: Error {
         case directoryCreationError
-        case serializationError
-        case fileReadError
     }
 
-    /// Initialize with a custom directory (useful for tests).
+    /// - Parameter directory: Custom storage directory (useful for tests).
+    ///   Defaults to `Application Support/<bundle id>/reports`.
     public init(directory: URL? = nil) throws {
-        let dir: URL
-        if let directory = directory {
-            dir = directory
-        } else if let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-                  let bundleID = Bundle.main.bundleIdentifier {
-            dir = appSupportURL.appendingPathComponent(bundleID).appendingPathComponent("reports")
+        if let directory {
+            reportsDirectory = directory
+        } else if let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let bundleID = Bundle.main.bundleIdentifier ?? "ErrorUpdate"
+            reportsDirectory = appSupportURL.appendingPathComponent(bundleID).appendingPathComponent("reports")
         } else {
             throw StoreError.directoryCreationError
         }
 
-        self.reportsDirectory = dir
-        try queue.sync {
-            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-        }
+        try fileManager.createDirectory(at: reportsDirectory, withIntermediateDirectories: true)
     }
 
-    /// Initialize with a custom directory (convenience).
-    public convenience init(directory: URL) throws {
-        try self.init(directory: directory)
-    }
-
-    public func save(_ report: ErrorReport) {
+    /// Saves a report, merging it with an existing duplicate when one exists.
+    /// - Parameter completion: Called on a background queue once the write finished.
+    public func save(_ report: ErrorReport, completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             do {
                 var reportToSave = report
 
-                // Deduplication logic: if same contentHash within 24h, increment counter
                 let existingReports = try self.fetchAllUnsafe()
                 if let existing = existingReports.first(where: {
                     $0.contentHash == report.contentHash &&
-                    $0.timestamp.timeIntervalSinceNow > -86400
+                    $0.timestamp.timeIntervalSinceNow > -self.deduplicationWindow
                 }) {
                     reportToSave = existing
                     reportToSave.count += 1
@@ -56,43 +52,44 @@ public class ReportStore {
                 encoder.dateEncodingStrategy = .iso8601
                 let data = try encoder.encode(reportToSave)
                 let fileURL = self.reportsDirectory.appendingPathComponent("\(reportToSave.id.uuidString).json")
-                try data.write(to: fileURL)
-
-                print("Saved report with ID: \(reportToSave.id)")
+                try data.write(to: fileURL, options: .atomic)
             } catch {
-                print("Failed to save report: \(error)")
+                fputs("ErrorUpdate: failed to save report: \(error)\n", stderr)
             }
+            completion?()
         }
     }
 
+    /// Returns all stored reports, newest first.
     public func fetchAll() -> [ErrorReport] {
-        return queue.sync {
+        queue.sync {
             do {
-                return try fetchAllUnsafe()
+                return try fetchAllUnsafe().sorted { $0.timestamp > $1.timestamp }
             } catch {
-                print("Failed to fetch reports: \(error)")
+                fputs("ErrorUpdate: failed to fetch reports: \(error)\n", stderr)
                 return []
             }
         }
     }
 
-    public func markAsSent(_ id: UUID) {
+    /// Removes a report after it was successfully delivered.
+    public func markAsSent(_ id: UUID, completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             let fileURL = self.reportsDirectory.appendingPathComponent("\(id.uuidString).json")
-            if self.fileManager.fileExists(atPath: fileURL.path) {
-                try? self.fileManager.removeItem(at: fileURL)
-                print("Marked report as sent (deleted): \(id)")
-            }
+            try? self.fileManager.removeItem(at: fileURL)
+            completion?()
         }
     }
 
+    // Must only be called on `queue`.
     private func fetchAllUnsafe() throws -> [ErrorReport] {
         let fileURLs = try fileManager.contentsOfDirectory(at: reportsDirectory, includingPropertiesForKeys: nil)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
         return fileURLs.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
+            guard url.pathExtension == "json",
+                  let data = try? Data(contentsOf: url) else { return nil }
             return try? decoder.decode(ErrorReport.self, from: data)
         }
     }

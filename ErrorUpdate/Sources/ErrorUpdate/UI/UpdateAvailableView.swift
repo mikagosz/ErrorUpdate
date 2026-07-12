@@ -2,30 +2,39 @@
 //  UpdateAvailableView.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
-//
 
 import SwiftUI
 
-@available(macOS 11.0, *)
 public struct UpdateAvailableView: View {
-    
+
     // MARK: - Properties
-    
+
     let updateInfo: UpdateInfo
     let currentVersion: String
-    
-    // State for the download process
-    @Binding var downloadProgress: Double // 0.0 to 1.0
-    @Binding var isDownloading: Bool
-    
-    // Actions to be provided by the presenter
+    let isDownloading: Bool
+
     var onInstall: () -> Void
     var onLater: () -> Void
     var onSkip: () -> Void
-    
+
+    public init(
+        updateInfo: UpdateInfo,
+        currentVersion: String,
+        isDownloading: Bool = false,
+        onInstall: @escaping () -> Void,
+        onLater: @escaping () -> Void,
+        onSkip: @escaping () -> Void
+    ) {
+        self.updateInfo = updateInfo
+        self.currentVersion = currentVersion
+        self.isDownloading = isDownloading
+        self.onInstall = onInstall
+        self.onLater = onLater
+        self.onSkip = onSkip
+    }
+
     // MARK: - Neon Theme Colors
-    
+
     private struct NeonStyle {
         static let backgroundColor = Color.black.opacity(0.9)
         static let primaryTextColor = Color(red: 0.9, green: 0.9, blue: 0.9)
@@ -34,23 +43,23 @@ public struct UpdateAvailableView: View {
         static let borderColor = Color.white.opacity(0.2)
         static let detailsBackgroundColor = Color.black.opacity(0.5)
     }
-    
+
     // MARK: - Body
-    
+
     public var body: some View {
         VStack(spacing: 20) {
             header
-            
+
             Divider().background(NeonStyle.borderColor)
-            
+
             releaseNotesSection
-            
+
             if isDownloading {
                 progressView
             }
-            
+
             Divider().background(NeonStyle.borderColor)
-            
+
             actions
         }
         .padding(30)
@@ -63,28 +72,28 @@ public struct UpdateAvailableView: View {
                 .stroke(NeonStyle.borderColor, lineWidth: 1)
         )
     }
-    
+
     // MARK: - Subviews
-    
+
     private var header: some View {
         HStack {
             Image(systemName: "arrow.down.circle.fill")
                 .font(.largeTitle)
                 .foregroundColor(NeonStyle.accentColor)
-            
+
             VStack(alignment: .leading) {
                 Text("Update Available")
                     .font(.title2)
                     .fontWeight(.bold)
                     .foregroundColor(NeonStyle.titleColor)
-                
+
                 Text("Version \(updateInfo.latestVersion) is now available. You have \(currentVersion).")
                     .font(.callout)
                     .foregroundColor(NeonStyle.primaryTextColor)
             }
         }
     }
-    
+
     private var releaseNotesSection: some View {
         ScrollView {
             Text(updateInfo.releaseNotes)
@@ -96,24 +105,24 @@ public struct UpdateAvailableView: View {
         .cornerRadius(8)
         .frame(minHeight: 100, maxHeight: 200)
     }
-    
+
     private var progressView: some View {
         VStack {
-            ProgressView(value: downloadProgress)
+            ProgressView()
                 .progressViewStyle(LinearProgressViewStyle())
-            Text(String(format: "Downloading... %.0f%%", downloadProgress * 100))
+            Text("Downloading update…")
                 .font(.caption)
                 .foregroundColor(NeonStyle.primaryTextColor)
         }
     }
-    
+
     private var actions: some View {
         HStack {
             if !updateInfo.mandatory {
                 Button("Never Ask Again") {
                     onSkip()
                 }
-                
+
                 Spacer()
 
                 Button("Later") {
@@ -125,7 +134,7 @@ public struct UpdateAvailableView: View {
                     .foregroundColor(.gray)
                 Spacer()
             }
-            
+
             Button("Install Now") {
                 onInstall()
             }
@@ -137,43 +146,34 @@ public struct UpdateAvailableView: View {
 
 // MARK: - Previews
 
-@available(macOS 11.0, *)
 struct UpdateAvailableView_Previews: PreviewProvider {
     static var previews: some View {
         let sampleUpdate = UpdateInfo(
             latestVersion: "1.1.0",
-            available: true,
-            releaseNotes: "• Added new feature X.
-• Fixed a bug that caused a crash when saving files.
-• Improved performance and memory usage.",
+            releaseNotes: "• Added new feature X.\n• Fixed a bug that caused a crash when saving files.\n• Improved performance and memory usage.",
             downloadURL: URL(string: "https://example.com")!,
-            sha256: "abcde12345",
-            mandatory: false
+            sha256: "abcde12345"
         )
-        
+
         let mandatoryUpdate = UpdateInfo(
             latestVersion: "2.0.0",
-            available: true,
             releaseNotes: "This is a critical security update that must be installed.",
             downloadURL: URL(string: "https://example.com")!,
             sha256: "abcde12345",
             mandatory: true
         )
-        
+
         Group {
             UpdateAvailableView(
                 updateInfo: sampleUpdate,
                 currentVersion: "1.0.0",
-                downloadProgress: .constant(0.65),
-                isDownloading: .constant(true),
+                isDownloading: true,
                 onInstall: {}, onLater: {}, onSkip: {}
             )
-            
+
             UpdateAvailableView(
                 updateInfo: mandatoryUpdate,
                 currentVersion: "1.0.0",
-                downloadProgress: .constant(0.0),
-                isDownloading: .constant(false),
                 onInstall: {}, onLater: {}, onSkip: {}
             )
         }

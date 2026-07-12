@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM
+DerivedData/
+*.xcuserdata/
+xcuserdata/
+ErrorUpdate/.build/
+
+# Klucze podpisujące aktualizacje — NIGDY nie commitować klucza prywatnego
+keys/
+
+# Generowane pliki serwera testowego
+TestServer/www/
+TestServer/.build/

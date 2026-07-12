@@ -2,126 +2,84 @@
 //  ServerClient.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
-//
 
 import Foundation
 
 /// Handles communication with the remote server for version checking and error reporting.
-internal class ServerClient {
-    
-    private let serverURL: URL
-    private let appID: String
-    private let apiKey: String
+final class ServerClient: Sendable {
+
+    enum ServerError: LocalizedError {
+        case invalidResponse
+        case httpError(statusCode: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "The server returned an invalid response."
+            case .httpError(let statusCode):
+                return "The server returned HTTP status \(statusCode)."
+            }
+        }
+    }
+
+    private let config: ErrorUpdateConfig
     private let currentVersion: String
     private let session: URLSession
 
-    /// Custom errors for the ServerClient.
-    enum ServerError: Error {
-        case invalidResponse
-        case networkError(Error)
-        case httpError(statusCode: Int)
-        case dataEncodingError
-    }
-
-    init(serverURL: URL, appID: String, apiKey: String, currentVersion: String) {
-        self.serverURL = serverURL
-        self.appID = appID
-        self.apiKey = apiKey
+    init(config: ErrorUpdateConfig, currentVersion: String, session: URLSession? = nil) {
+        self.config = config
         self.currentVersion = currentVersion
-        
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 60
-        self.session = URLSession(configuration: configuration)
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.default
+            configuration.timeoutIntervalForRequest = 30
+            configuration.timeoutIntervalForResource = 120
+            self.session = URLSession(configuration: configuration)
+        }
     }
 
-    /// Prepares a URLRequest with the necessary headers.
-    private func createRequest(path: String, httpMethod: String) -> URLRequest {
-        let url = serverURL.appendingPathComponent(path)
-        var request = URLRequest(url: url)
+    private func makeRequest(path: String, httpMethod: String) -> URLRequest {
+        var request = URLRequest(url: config.serverURL.appendingPathComponent(path))
         request.httpMethod = httpMethod
-        request.setValue(appID, forHTTPHeaderField: "X-App-ID")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(config.appID, forHTTPHeaderField: "X-App-ID")
+        if let apiKey = config.apiKey {
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
         request.setValue(currentVersion, forHTTPHeaderField: "X-Current-Version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return request
     }
 
     /// Fetches the latest version information from the server.
-    /// - Parameter completion: A closure to be called with the result.
-    func fetchVersionInfo(completion: @escaping (Result<UpdateInfo, Error>) -> Void) {
-        let request = createRequest(path: "/api/error-update/version-check", httpMethod: "GET")
+    func fetchVersionInfo() async throws -> UpdateInfo {
+        let request = makeRequest(path: "api/error-update/version-check", httpMethod: "GET")
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response)
 
-        // Note: Retry logic will be added here later.
-        let task = session.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(ServerError.networkError(error)))
-                return
-            }
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(ServerError.invalidResponse))
-                return
-            }
-
-            guard (200...299).contains(httpResponse.statusCode) else {
-                completion(.failure(ServerError.httpError(statusCode: httpResponse.statusCode)))
-                return
-            }
-
-            guard let data = data else {
-                completion(.failure(ServerError.invalidResponse))
-                return
-            }
-
-            do {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                let updateInfo = try decoder.decode(UpdateInfo.self, from: data)
-                completion(.success(updateInfo))
-            } catch {
-                completion(.failure(error))
-            }
-        }
-        task.resume()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(UpdateInfo.self, from: data)
     }
 
     /// Submits an error report to the server.
-    /// - Parameters:
-    ///   - report: The `ErrorReport` to submit.
-    ///   - completion: A closure to be called with the result.
-    func submitErrorReport(_ report: ErrorReport, completion: @escaping (Result<Void, Error>) -> Void) {
-        var request = createRequest(path: "/api/error-update/report", httpMethod: "POST")
-        
-        do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            request.httpBody = try encoder.encode(report)
-        } catch {
-            completion(.failure(ServerError.dataEncodingError))
-            return
+    func submitReport(_ report: ErrorReport) async throws {
+        var request = makeRequest(path: "api/error-update/report", httpMethod: "POST")
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        request.httpBody = try encoder.encode(report)
+
+        let (_, response) = try await session.data(for: request)
+        try Self.validate(response)
+    }
+
+    private static func validate(_ response: URLResponse) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ServerError.invalidResponse
         }
-
-        // Note: Retry logic will be added here later.
-        let task = session.dataTask(with: request) { data, response, error in
-            if let error = error {
-                completion(.failure(ServerError.networkError(error)))
-                return
-            }
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                completion(.failure(ServerError.invalidResponse))
-                return
-            }
-
-            guard (200...299).contains(httpResponse.statusCode) else {
-                completion(.failure(ServerError.httpError(statusCode: httpResponse.statusCode)))
-                return
-            }
-
-            completion(.success(()))
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw ServerError.httpError(statusCode: httpResponse.statusCode)
         }
-        task.resume()
     }
 }

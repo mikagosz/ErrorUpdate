@@ -2,25 +2,10 @@ import Testing
 @testable import ErrorUpdate
 import Foundation
 
+@MainActor
 @Suite struct ErrorUpdateManagerTests {
 
-    // MARK: 1. logError przed configure() nie crashuje (assert w debug, throw w release)
-
-    @Test func logErrorBeforeConfigure_doesNotCrash() {
-        let manager = ErrorUpdateManager.shared
-        // Reset singleton state for test isolation
-        manager.configure(
-            serverURL: URL(string: "https://example.com/check")!,
-            publicKey: Data(),
-            reportingOptIn: false
-        )
-
-        // After configure, logError should work without crash
-        manager.logError(NSError(domain: "Test", code: 0))
-        #expect(true)
-    }
-
-    // MARK: 2. Configure ustawia isConfigured
+    // MARK: 1. Configure ustawia isConfigured
 
     @Test func configure_setsIsConfiguredTrue() {
         let manager = ErrorUpdateManager.shared
@@ -31,7 +16,7 @@ import Foundation
         #expect(manager.isConfigured == true)
     }
 
-    // MARK: 3. Configure z pustym kluczem — bez crasha
+    // MARK: 2. Configure z pustym kluczem — bez crasha
 
     @Test func configure_withEmptyPublicKey_doesNotCrash() {
         let manager = ErrorUpdateManager.shared
@@ -43,18 +28,24 @@ import Foundation
         #expect(manager.isConfigured)
     }
 
-    // MARK: 4. Reporting opt-out — logowanie działa, wysyłka pomijana
+    // MARK: 3. logError po configure działa bez crasha
 
-    @Test func logError_withOptOut_logsLocally() {
+    @Test func logErrorAfterConfigure_doesNotCrash() {
         let manager = ErrorUpdateManager.shared
         manager.configure(
             serverURL: URL(string: "https://example.com/check")!,
+            publicKey: Data(),
             reportingOptIn: false
         )
-        let countBefore = manager.pendingReportsCount
+
         manager.logError(NSError(domain: "Test", code: 0))
-        // Po zapisie lokalnym licznik powinien wzrosnąć (lub nie spaść)
-        // Dokładny wynik zależy od synchronizacji z ReportStore
+        #expect(manager.isConfigured)
+    }
+
+    // MARK: 4. currentVersion pochodzi z bundle (w testach może być nil)
+
+    @Test func currentVersion_doesNotCrash() {
+        _ = ErrorUpdateManager.shared.currentVersion
         #expect(true)
     }
 }

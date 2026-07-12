@@ -2,52 +2,62 @@
 //  EmailComposer.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
-//
 
 import AppKit
 
-/// Composes and presents an email with the error report.
-class EmailComposer {
-    
-    // This would be configured via ErrorUpdateManager
-    private static var recipientEmail: String = "reports@example.com" // Placeholder
+/// Composes an email with an error report using the default mail client.
+@MainActor
+public enum EmailComposer {
+
+    /// A `mailto:` URL only reliably works up to about this length.
+    private static let mailtoLengthLimit = 2000
 
     /// Attempts to open the user's default mail client with a pre-filled report.
-    /// - Parameter report: The `ErrorReport` to be sent.
-    /// - Returns: `true` if the mail client was successfully opened, `false` otherwise.
+    /// When the report is too long for a `mailto:` link, only the summary is
+    /// included in the body and the full report is copied to the clipboard.
+    /// - Returns: `true` if the mail client was opened.
     @discardableResult
-    static func send(report: ErrorReport) -> Bool {
-        let subject = "Error Report: \(report.appVersion) - \(report.errorMessage.prefix(40))...".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Error Report"
-        let body = ReportBuilder.formatAsPlainText(report: report).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Could not format report."
-        
-        let mailtoURLString = "mailto:\(recipientEmail)?subject=\(subject)&body=\(body)"
-        
-        guard let url = URL(string: mailtoURLString) else {
+    public static func send(report: ErrorReport, to recipient: String) -> Bool {
+        let subject = "Error Report: \(report.appVersion) - \(report.errorMessage.prefix(40))"
+        let fullBody = ReportBuilder.formatAsPlainText(report: report)
+
+        var body = fullBody
+        if mailtoURL(to: recipient, subject: subject, body: body) == nil
+            || mailtoLength(to: recipient, subject: subject, body: body) > mailtoLengthLimit {
+            // Too long — fall back to a short body plus clipboard.
+            copyToClipboard(report: report)
+            body = """
+            \(report.errorMessage)
+
+            (The full report was copied to the clipboard — please paste it here.)
+            """
+        }
+
+        guard let url = mailtoURL(to: recipient, subject: subject, body: body) else {
             return false
         }
-        
-        // Check if the URL is too long for mailto (a common but informal limit is ~2000 characters)
-        if mailtoURLString.count > 2000 {
-            print("Warning: Report is too long for a 'mailto:' link. Consider a different reporting method.")
-            return false
-        }
-        
-        // Use NSWorkspace to open the URL, which will launch the default mail client.
-        if NSWorkspace.shared.open(url) {
-            return true
-        } else {
-            // Fallback if opening the URL fails for some reason.
-            return false
-        }
+        return NSWorkspace.shared.open(url)
     }
 
-    /// Copies the plain-text version of a report to the user's clipboard.
-    /// This is a fallback for when the mail client cannot be opened.
-    /// - Parameter report: The `ErrorReport` to be copied.
-    static func copyToClipboard(report: ErrorReport) {
+    /// Copies the plain-text version of a report to the clipboard.
+    public static func copyToClipboard(report: ErrorReport) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(ReportBuilder.formatAsPlainText(report: report), forType: .string)
+    }
+
+    private static func mailtoURL(to recipient: String, subject: String, body: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = recipient
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body),
+        ]
+        return components.url
+    }
+
+    private static func mailtoLength(to recipient: String, subject: String, body: String) -> Int {
+        mailtoURL(to: recipient, subject: subject, body: body)?.absoluteString.count ?? .max
     }
 }

@@ -4,45 +4,45 @@ This guide provides a step-by-step walkthrough for integrating the `ErrorUpdate`
 
 ## 1. Configuration
 
-The first step is to configure the `ErrorUpdateManager` singleton. This should be done once, early in the application's lifecycle. The `applicationDidFinishLaunching` method in your `AppDelegate` is the ideal place for this.
+Configure the `ErrorUpdateManager` singleton once, early in the application's lifecycle — `applicationDidFinishLaunching` is the ideal place.
 
 ```swift
 import ErrorUpdate
 
 // In your AppDelegate.swift
 func applicationDidFinishLaunching(_ aNotification: Notification) {
-    
-    guard let serverURL = URL(string: "https://your-api-server.com") else {
-        fatalError("Invalid server URL")
-    }
-    
-    // Get the current app version from your Info.plist
-    let currentVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
 
     ErrorUpdateManager.shared.configure(
-        serverURL: serverURL,
-        appID: "com.yourcompany.your-app-id",
-        apiKey: "YOUR_API_KEY",
-        currentVersion: currentVersion,
-        userEmail: "user@example.com" // Optional: pre-fill user's email
+        ErrorUpdateConfig(
+            serverURL: URL(string: "https://your-api-server.com")!,
+            appID: "com.yourcompany.your-app-id",   // default: bundle identifier
+            apiKey: "YOUR_API_KEY",                 // optional
+            publicKey: Data(/* raw Ed25519 key */), // optional, verifies update signatures
+            reportingOptIn: false,                  // true = auto-send reports to the server
+            supportEmail: "support@yourcompany.com" // used by the email report dialog
+        )
     )
-    
+
     // ... rest of your setup
 }
 ```
+
+The app version is read automatically from `CFBundleShortVersionString`.
 
 ## 2. Enabling Crash Handling
 
 To automatically catch native crashes and exceptions, call `setupCrashHandling()` after configuration.
 
 ```swift
-// In your AppDelegate.swift, after configure()
 ErrorUpdateManager.shared.setupCrashHandling()
 ```
 
+When the app crashes, a raw crash file is written using async-signal-safe calls.
+On the **next launch**, `configure()` converts it into an `ErrorReport` and stores it.
+
 ## 3. Manual Error Logging
 
-To log non-fatal Swift errors, use the `logError` method. You can provide an optional `context` dictionary for more detailed reports.
+To log non-fatal Swift errors, use `logError`. You can provide an optional `context` dictionary for more detailed reports.
 
 ```swift
 do {
@@ -55,55 +55,107 @@ do {
 }
 ```
 
+Reports are stored locally (deduplicated within 24 h) and exposed via the
+`pendingReports` published property. With `reportingOptIn = true` they are also
+sent to the server; delivered reports are removed from the store.
+
+```swift
+// Send everything that's still pending (e.g. on app start):
+await ErrorUpdateManager.shared.sendPendingReports()
+```
+
 ## 4. Update Checking
 
 ### Manual Check
 
-You can trigger an update check at any time, for example, from a "Check for Updates..." menu item.
-
 ```swift
-// In a menu action or button handler
-ErrorUpdateManager.shared.checkForUpdates()
+// In a menu action or button handler:
+Task {
+    await ErrorUpdateManager.shared.checkForUpdates() // force = true, ignores the 1h cache
+}
 ```
+
+The result lands in the published `availableUpdate` property.
 
 ### Periodic Check
 
-To automatically check for updates in the background, start the periodic checker. An interval of 3600 seconds (1 hour) is a common choice.
-
 ```swift
-// In your AppDelegate.swift, after configure()
 ErrorUpdateManager.shared.startPeriodicUpdateCheck(interval: 3600)
 ```
 
-## 5. Using the Delegate (Optional)
+Periodic checks respect a 1-hour cache to avoid hammering the server.
 
-You can conform to the `ErrorUpdateDelegate` to receive callbacks and customize behavior.
+### Download & Install
+
+```swift
+Task {
+    if await ErrorUpdateManager.shared.downloadUpdate() != nil {
+        await ErrorUpdateManager.shared.installUpdate() // verifies codesign, swaps the bundle, relaunches
+    }
+}
+```
+
+The downloaded file is verified against the server-provided SHA-256 checksum and,
+when `publicKey` is configured, its Ed25519 signature. Before installation the new
+bundle's code signature is verified with `codesign`. The previous version is kept
+as a backup until the copy succeeds.
+
+## 5. SwiftUI Integration
+
+`ErrorUpdateManager` is a `@MainActor ObservableObject`:
+
+```swift
+struct StatusView: View {
+    @ObservedObject var manager = ErrorUpdateManager.shared
+
+    var body: some View {
+        VStack {
+            Text("Pending reports: \(manager.pendingReportsCount)")
+            if let update = manager.availableUpdate {
+                Text("Update available: \(update.latestVersion)")
+            }
+        }
+    }
+}
+```
+
+You can also use the bundled dialogs:
+
+```swift
+let presenter = UIPresenter()
+presenter.present(report: report, supportEmail: "support@yourcompany.com")
+presenter.present(updateInfo: info, currentVersion: "1.0.0")
+```
+
+## 6. Using the Delegate (Optional)
+
+Conform to `ErrorUpdateDelegate` to receive callbacks. All methods are optional
+and called on the main actor.
 
 ```swift
 class MyDelegate: ErrorUpdateDelegate {
     func didCatchError(_ report: ErrorReport) {
-        // Log to a local file, send to another analytics service, etc.
         print("Caught an error: \(report.errorMessage)")
     }
-    
+
     func didDetectUpdate(_ info: UpdateInfo) {
-        // Maybe you want to show a custom UI before the default one.
         print("Update detected: \(info.latestVersion)")
     }
-    
+
     func updateDidFail(_ error: Error) {
-        // Handle a failed download or installation.
         print("Update failed: \(error.localizedDescription)")
     }
 }
 
-// In your AppDelegate.swift
+// Keep a strong reference — the manager holds the delegate weakly.
 let myDelegate = MyDelegate()
-
-func applicationDidFinishLaunching(_ aNotification: Notification) {
-    // ... configure ...
-    ErrorUpdateManager.shared.delegate = myDelegate
-}
+ErrorUpdateManager.shared.delegate = myDelegate
 ```
 
-This covers the complete integration of the framework. Remember to replace placeholder values like the server URL and API key with your actual production values.
+## Notes & Limitations
+
+- The update installer replaces the app bundle on disk, which does **not** work
+  inside the App Sandbox. Error reporting works fine in sandboxed apps.
+- Ed25519 signature verification is skipped when `publicKey` is empty — configure
+  it for production so a compromised server cannot serve a tampered update.
+- Remember to replace placeholder values (server URL, API key) with production values.

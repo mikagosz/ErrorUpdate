@@ -2,65 +2,57 @@
 //  SignalHandler.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
+//  Catches fatal POSIX signals and writes a raw crash file using
+//  async-signal-safe calls (open/write/backtrace_symbols_fd).
 //
 
 import Foundation
+import Darwin
 
-// C-style function to act as the signal handler
-private func signalHandler(signal: Int32) {
-    let signalName: String
-    switch signal {
-    case SIGSEGV: signalName = "SIGSEGV (Segmentation Fault)"
-    case SIGABRT: signalName = "SIGABRT (Abort)"
-    case SIGILL: signalName = "SIGILL (Illegal Instruction)"
-    case SIGFPE: signalName = "SIGFPE (Floating-Point Exception)"
-    case SIGPIPE: signalName = "SIGPIPE (Broken Pipe)"
-    default: signalName = "Unknown Signal (\(signal))"
+// C-compatible signal handler. Must stick to async-signal-safe operations:
+// no Foundation, no allocation beyond the accepted minimum.
+private func posixSignalHandler(_ signalNumber: Int32) {
+    guard CrashState.beginHandling() else { abort() }
+
+    let fd = CrashState.openCrashFile()
+    if fd >= 0 {
+        crashWrite("signal\n", to: fd)
+        crashWrite(String(signalNumber) + "\n", to: fd)
+
+        var callStack = [UnsafeMutableRawPointer?](repeating: nil, count: 128)
+        let frameCount = backtrace(&callStack, Int32(callStack.count))
+        if frameCount > 0 {
+            backtrace_symbols_fd(&callStack, frameCount, fd)
+        }
+        close(fd)
     }
 
-    let callStack = Thread.callStackSymbols
-
-    // TODO: Integrate with a crash handler that builds and saves the report.
-    print("--- FATAL SIGNAL ---")
-    print("Received signal: \(signalName)")
-    print("Stack Trace:")
-    callStack.forEach { print($0) }
-    print("--------------------")
-
-    // Unregister the signal handler and re-raise the signal to crash.
+    // Restore default handlers and re-raise so the system crash reporter runs.
     SignalHandler.unregister()
-    raise(signal)
+    raise(signalNumber)
 }
 
+/// Registers handlers for common fatal signals.
+enum SignalHandler {
 
-/// Sets up signal handlers for crash detection.
-class SignalHandler {
     private static let signalsToTrap: [Int32] = [
         SIGABRT,
+        SIGBUS,
+        SIGFPE,
         SIGILL,
         SIGSEGV,
-        SIGFPE,
-        SIGPIPE
+        SIGTRAP,
     ]
 
-    /// Registers the signal handlers for common crash signals.
     static func register() {
-        for signal in signalsToTrap {
-            // The first argument to `signal` is the signal number.
-            // The second is a pointer to the handler function.
-            // `SIG_ERR` is returned on failure.
-            if signal(signal, signalHandler) == SIG_ERR {
-                print("Error: Could not register signal handler for signal \(signal).")
-            }
+        for sig in signalsToTrap {
+            Darwin.signal(sig, posixSignalHandler)
         }
     }
 
-    /// Unregisters all custom signal handlers.
     static func unregister() {
-        for signal in signalsToTrap {
-            // Restore the default signal handler.
-            signal(signal, SIG_DFL)
+        for sig in signalsToTrap {
+            Darwin.signal(sig, SIG_DFL)
         }
     }
 }

@@ -2,125 +2,134 @@
 //  UpdateDownloader.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
-//
 
 import Foundation
 import CryptoKit
 
-/// Handles the download and verification of update files.
-class UpdateDownloader: NSObject, URLSessionDownloadDelegate {
-    
-    typealias ProgressHandler = (Double) -> Void
-    typealias CompletionHandler = (Result<URL, Error>) -> Void
-    
-    enum DownloadError: Error {
-        case verificationFailed
-        case fileMoveFailed
-        case unexpectedError
-    }
-    
-    private var session: URLSession!
-    private var progressHandler: ProgressHandler?
-    private var completionHandler: CompletionHandler?
-    private var expectedSHA256: String = ""
-    private var downloadTask: URLSessionDownloadTask?
-    
-    override init() {
-        super.init()
-        let configuration = URLSessionConfiguration.default
-        self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: .main)
-    }
+/// Downloads update files and verifies them via SHA-256 checksum and,
+/// when a public key is configured, an Ed25519 signature.
+public final class UpdateDownloader: Sendable {
 
-    /// Downloads an update file from a given URL.
-    /// - Parameters:
-    ///   - url: The URL to download the update from.
-    ///   - sha256: The expected SHA256 checksum of the file for verification.
-    ///   - progress: A closure to be called with the download progress (0.0 to 1.0).
-    ///   - completion: A closure to be called with the result, containing the URL to the verified file.
-    func downloadUpdate(from url: URL, sha256: String, progress: @escaping ProgressHandler, completion: @escaping CompletionHandler) {
-        self.progressHandler = progress
-        self.completionHandler = completion
-        self.expectedSHA256 = sha256.lowercased()
-        
-        // Clean up any old downloads before starting a new one.
-        cleanup()
-        
-        let task = session.downloadTask(with: url)
-        self.downloadTask = task
-        task.resume()
-    }
-    
-    // MARK: - URLSessionDownloadDelegate
-    
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        progressHandler?(progress)
-    }
-    
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        do {
-            // 1. Verify the checksum
-            let downloadedSHA256 = try self.sha256(for: location)
-            guard downloadedSHA256.lowercased() == self.expectedSHA256 else {
-                completionHandler?(.failure(DownloadError.verificationFailed))
-                return
+    public enum DownloadError: LocalizedError {
+        case sha256Mismatch(expected: String, actual: String)
+        case invalidSignatureFormat
+        case signatureVerificationFailed
+        case invalidPublicKey(Error)
+
+        public var errorDescription: String? {
+            switch self {
+            case .sha256Mismatch(let expected, let actual):
+                return "SHA-256 mismatch: expected \(expected), got \(actual)"
+            case .invalidSignatureFormat:
+                return "Invalid signature format (expected 64-byte Base64)"
+            case .signatureVerificationFailed:
+                return "Ed25519 signature verification failed"
+            case .invalidPublicKey(let error):
+                return "Invalid public key: \(error.localizedDescription)"
             }
-            
-            // 2. Move the verified file to a permanent cache location
-            let destinationURL = try self.cacheDirectory().appendingPathComponent(location.lastPathComponent)
-            try FileManager.default.moveItem(at: location, to: destinationURL)
-            
-            completionHandler?(.success(destinationURL))
-            
-        } catch {
-            completionHandler?(.failure(error))
-        }
-    }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            completionHandler?(.failure(error))
         }
     }
 
-    // MARK: - File Management & Verification
-    
-    private func cacheDirectory() throws -> URL {
-        let fileManager = FileManager.default
-        let cacheURL = try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let downloaderCacheURL = cacheURL.appendingPathComponent("com.gemini.ErrorUpdate")
-        
-        if !fileManager.fileExists(atPath: downloaderCacheURL.path) {
-            try fileManager.createDirectory(at: downloaderCacheURL, withIntermediateDirectories: true, attributes: nil)
-        }
-        
-        return downloaderCacheURL
+    private let config: ErrorUpdateConfig
+    private let session: URLSession
+    private let maxRetries = 3
+    private let baseDelay: TimeInterval = 2
+
+    public init(config: ErrorUpdateConfig, session: URLSession = .shared) {
+        self.config = config
+        self.session = session
     }
 
-    /// Cleans up any files in the downloader's cache directory.
-    func cleanup() {
-        do {
-            let cacheDir = try cacheDirectory()
-            let fileManager = FileManager.default
-            let items = try fileManager.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)
-            for item in items {
-                try fileManager.removeItem(at: item)
+    /// Downloads the update file from `info.downloadURL` and verifies it.
+    /// Returns the URL of the verified file; throws on any verification failure.
+    /// Network failures are retried with exponential backoff.
+    public func download(_ info: UpdateInfo) async throws -> URL {
+        var lastError: Error?
+        for attempt in 0..<maxRetries {
+            do {
+                return try await downloadAndVerify(info)
+            } catch let error as DownloadError {
+                // Verification failures are not transient — do not retry.
+                throw error
+            } catch {
+                lastError = error
+                if attempt < maxRetries - 1 {
+                    let delay = baseDelay * pow(2, Double(attempt))
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
             }
+        }
+        throw lastError ?? URLError(.unknown)
+    }
+
+    private func downloadAndVerify(_ info: UpdateInfo) async throws -> URL {
+        // A unique directory per download avoids collisions between attempts.
+        let downloadDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ErrorUpdate_download")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
+
+        let fileName = info.downloadURL.lastPathComponent.isEmpty ? "update" : info.downloadURL.lastPathComponent
+        let destinationURL = downloadDir.appendingPathComponent(fileName)
+
+        let (downloadedURL, response) = try await session.download(from: info.downloadURL)
+
+        do {
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200...299).contains(httpResponse.statusCode) {
+                throw ServerClient.ServerError.httpError(statusCode: httpResponse.statusCode)
+            }
+
+            try FileManager.default.moveItem(at: downloadedURL, to: destinationURL)
+
+            // 1. Verify SHA-256 (streamed, so large files never sit in memory).
+            let actualSHA256 = try Self.sha256(of: destinationURL)
+            guard actualSHA256.lowercased() == info.sha256.lowercased() else {
+                throw DownloadError.sha256Mismatch(expected: info.sha256, actual: actualSHA256)
+            }
+
+            // 2. Verify Ed25519 signature when both key and signature are present.
+            if !config.publicKey.isEmpty && !info.signature.isEmpty {
+                try Self.verifySignature(for: destinationURL, signature: info.signature, publicKey: config.publicKey)
+            }
+
+            return destinationURL
         } catch {
-            print("Error cleaning up cache: \(error)")
+            try? FileManager.default.removeItem(at: downloadDir)
+            throw error
         }
     }
-    
-    /// Calculates the SHA256 checksum of a file at a given URL.
-    private func sha256(for fileURL: URL) throws -> String {
+
+    /// Streams the file through SHA-256 in 1 MB chunks.
+    static func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func verifySignature(for fileURL: URL, signature base64Signature: String, publicKey: Data) throws {
+        guard let signatureData = Data(base64Encoded: base64Signature),
+              signatureData.count == 64 else {
+            throw DownloadError.invalidSignatureFormat
+        }
+
+        let key: Curve25519.Signing.PublicKey
+        do {
+            key = try Curve25519.Signing.PublicKey(rawRepresentation: publicKey)
+        } catch {
+            throw DownloadError.invalidPublicKey(error)
+        }
+
+        // Ed25519 needs the whole message; update files are typically small
+        // enough (tens of MB) for this to be acceptable.
         let fileData = try Data(contentsOf: fileURL)
-        let digest = SHA256.hash(data: fileData)
-        return digest.compactMap { String(format: "%02x", $0) }.joined()
-    }
-    
-    /// Cancels the ongoing download task.
-    func cancel() {
-        downloadTask?.cancel()
+        guard key.isValidSignature(signatureData, for: fileData) else {
+            throw DownloadError.signatureVerificationFailed
+        }
     }
 }

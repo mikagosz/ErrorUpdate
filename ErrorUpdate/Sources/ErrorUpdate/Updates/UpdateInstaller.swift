@@ -2,151 +2,194 @@
 //  UpdateInstaller.swift
 //  ErrorUpdate
 //
-//  Created by Gemini on 2026-07-04.
-//
 
 import Foundation
 import AppKit
 
-/// Handles the installation of a downloaded update file.
-class UpdateInstaller {
-    
-    enum InstallerError: Error {
+/// Installs updates from downloaded `.dmg` or `.zip` files.
+///
+/// Note: installation replaces the app bundle on disk, which requires the app
+/// to run outside the App Sandbox (or with appropriate user consent).
+public final class UpdateInstaller: Sendable {
+
+    public enum InstallerError: LocalizedError {
         case unsupportedFileFormat
         case taskFailed(command: String, exitCode: Int32, output: String)
         case couldNotFindAppBundle
+        case codeSignVerificationFailed(String)
         case installationFailed(Error)
-        case couldNotGetApplicationSupportDirectory
-    }
 
-    /// Installs an update from a local file URL.
-    /// - Parameter downloadedFileURL: The URL of the downloaded `.dmg` or `.zip` file.
-    /// - Parameter completion: A closure to be called with the result.
-    func installUpdate(from downloadedFileURL: URL, completion: @escaping (Result<Void, Error>) -> Void) {
-        let fileExtension = downloadedFileURL.pathExtension.lowercased()
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                switch fileExtension {
-                case "dmg":
-                    try self.installDmg(at: downloadedFileURL)
-                case "zip":
-                    try self.installZip(at: downloadedFileURL)
-                default:
-                    throw InstallerError.unsupportedFileFormat
-                }
-                
-                // TODO: Relaunch the application.
-                // This is a complex task that requires a helper process or a script.
-                // For now, we will just signal success.
-                print("Installation successful. App relaunch needed.")
-                
-                DispatchQueue.main.async {
-                    completion(.success(()))
-                }
-                
-            } catch {
-                DispatchQueue.main.async {
-                    completion(.failure(error))
-                }
+        public var errorDescription: String? {
+            switch self {
+            case .unsupportedFileFormat:
+                return "Unsupported update file format (expected .dmg or .zip)."
+            case .taskFailed(let command, let exitCode, let output):
+                return "\(command) failed with exit code \(exitCode): \(output)"
+            case .couldNotFindAppBundle:
+                return "No .app bundle found inside the update."
+            case .codeSignVerificationFailed(let output):
+                return "Code signature verification failed: \(output)"
+            case .installationFailed(let error):
+                return "Installation failed: \(error.localizedDescription)"
             }
         }
     }
-    
+
+    public init() {}
+
+    /// Installs an update from a local `.dmg` or `.zip` file.
+    /// Blocking — call it from a background thread or task.
+    /// - Parameter installDirectory: Where to place the new app bundle.
+    ///   Defaults to the directory of the currently running app (or /Applications).
+    /// - Returns: URL of the installed app bundle.
+    @discardableResult
+    public func install(_ fileURL: URL, into installDirectory: URL? = nil) throws -> URL {
+        switch fileURL.pathExtension.lowercased() {
+        case "dmg":
+            return try installDmg(at: fileURL, installDirectory: installDirectory)
+        case "zip":
+            return try installZip(at: fileURL, installDirectory: installDirectory)
+        default:
+            throw InstallerError.unsupportedFileFormat
+        }
+    }
+
+    /// Launches a new instance of the app at `appURL` and terminates this one.
+    @MainActor
+    public func relaunch(appAt appURL: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", appURL.path]
+        try? process.run()
+        NSApp.terminate(nil)
+    }
+
     // MARK: - DMG Installation
-    
-    private func installDmg(at dmgURL: URL) throws {
-        // 1. Attach DMG
-        let attachResult = try runTask(command: "/usr/bin/hdiutil", arguments: ["attach", "-nobrowse", "-mountpoint", "/Volumes/ErrorUpdateInstaller", dmgURL.path])
-        
-        let mountPoint = "/Volumes/ErrorUpdateInstaller"
-        
-        // Ensure cleanup happens even if subsequent steps fail
+
+    private func installDmg(at dmgURL: URL, installDirectory: URL?) throws -> URL {
+        // Unique mount point so parallel installs (or leftovers) never collide.
+        let mountPoint = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ErrorUpdate_mount_\(UUID().uuidString)").path
+
+        try runCommand("/usr/bin/hdiutil", arguments: ["attach", "-nobrowse", "-mountpoint", mountPoint, dmgURL.path])
         defer {
-            do {
-                try runTask(command: "/usr/bin/hdiutil", arguments: ["detach", mountPoint])
-            } catch {
-                print("Failed to detach DMG: \(error)")
-            }
+            _ = try? runCommand("/usr/bin/hdiutil", arguments: ["detach", mountPoint, "-force"])
         }
 
-        // 2. Find .app bundle
         guard let appURL = try findAppBundle(in: URL(fileURLWithPath: mountPoint)) else {
             throw InstallerError.couldNotFindAppBundle
         }
-        
-        // 3. Copy .app to /Applications
-        let appName = appURL.lastPathComponent
-        let destinationURL = URL(fileURLWithPath: "/Applications/\(appName)")
-        
-        // TODO: Backup existing application before replacing.
-        
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.removeItem(at: destinationURL)
-        }
-        
-        try FileManager.default.copyItem(at: appURL, to: destinationURL)
-    }
-    
-    // MARK: - ZIP Installation
-    
-    private func installZip(at zipURL: URL) throws {
-        // 1. Unzip to a temporary directory
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true, attributes: nil)
-        
-        defer {
-            try? FileManager.default.removeItem(at: tempDir)
-        }
 
-        try runTask(command: "/usr/bin/unzip", arguments: [zipURL.path, "-d", tempDir.path])
-        
-        // 2. Find .app bundle in the unzipped contents
+        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory)
+    }
+
+    // MARK: - ZIP Installation
+
+    private func installZip(at zipURL: URL, installDirectory: URL?) throws -> URL {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try runCommand("/usr/bin/ditto", arguments: ["-x", "-k", zipURL.path, tempDir.path])
+
         guard let appURL = try findAppBundle(in: tempDir) else {
             throw InstallerError.couldNotFindAppBundle
         }
 
-        // 3. Copy .app to /Applications
-        let appName = appURL.lastPathComponent
-        let destinationURL = URL(fileURLWithPath: "/Applications/\(appName)")
+        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory)
+    }
 
-        // TODO: Backup existing application before replacing.
+    // MARK: - Replacement
 
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.removeItem(at: destinationURL)
+    /// Verifies the new bundle's code signature, then swaps it in with a backup
+    /// so a failed copy never leaves the user without an app.
+    private func replaceInstalledApp(with newAppURL: URL, installDirectory: URL?) throws -> URL {
+        try verifyCodeSignature(newAppURL)
+
+        let fileManager = FileManager.default
+        let appName = newAppURL.lastPathComponent
+
+        // Install next to the currently running bundle when possible,
+        // otherwise fall back to /Applications.
+        let installDir: URL
+        if let installDirectory {
+            installDir = installDirectory
+        } else if Bundle.main.bundleURL.pathExtension == "app" {
+            installDir = Bundle.main.bundleURL.deletingLastPathComponent()
+        } else {
+            installDir = URL(fileURLWithPath: "/Applications")
         }
-        
-        try FileManager.default.copyItem(at: appURL, to: destinationURL)
+        let destinationURL = installDir.appendingPathComponent(appName)
+
+        var backupURL: URL?
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            let backup = installDir.appendingPathComponent(appName + ".backup-\(UUID().uuidString.prefix(8))")
+            try fileManager.moveItem(at: destinationURL, to: backup)
+            backupURL = backup
+        }
+
+        do {
+            try fileManager.copyItem(at: newAppURL, to: destinationURL)
+        } catch {
+            // Restore the previous version if the copy failed.
+            if let backupURL {
+                try? fileManager.moveItem(at: backupURL, to: destinationURL)
+            }
+            throw InstallerError.installationFailed(error)
+        }
+
+        if let backupURL {
+            try? fileManager.removeItem(at: backupURL)
+        }
+        return destinationURL
     }
 
     // MARK: - Helpers
-    
+
     @discardableResult
-    private func runTask(command: String, arguments: [String]) throws -> String {
+    private func runCommand(_ command: String, arguments: [String]) throws -> String {
         let process = Process()
-        process.launchPath = command
+        process.executableURL = URL(fileURLWithPath: command)
         process.arguments = arguments
-        
+
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
-        
-        process.launch()
-        
+
+        try process.run()
+        // Read before waiting so a full pipe buffer can never deadlock the process.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        
         process.waitUntilExit()
-        
-        if process.terminationStatus != 0 {
+
+        let output = String(data: data, encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
             throw InstallerError.taskFailed(command: command, exitCode: process.terminationStatus, output: output)
         }
-        
         return output
     }
-    
+
+    /// Searches a directory (one level deep, then recursively) for a .app bundle.
     private func findAppBundle(in directory: URL) throws -> URL? {
-        let contents = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
-        return contents.first { $0.pathExtension == "app" }
+        let contents = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
+
+        if let app = contents.first(where: { $0.pathExtension == "app" }) {
+            return app
+        }
+        for item in contents where item.hasDirectoryPath {
+            if let found = try findAppBundle(in: item) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// Verifies the code signature of an app bundle using `codesign`.
+    private func verifyCodeSignature(_ appURL: URL) throws {
+        do {
+            try runCommand("/usr/bin/codesign", arguments: ["--verify", "--deep", "--strict", appURL.path])
+        } catch InstallerError.taskFailed(_, _, let output) {
+            throw InstallerError.codeSignVerificationFailed(output)
+        }
     }
 }

@@ -1,15 +1,20 @@
 import SwiftUI
-import Combine
 import AppKit
+import ErrorUpdate
 
 // AppDelegate to configure the framework on launch
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        #if DEBUG
         ErrorUpdateManager.shared.configure(
-            serverURL: URL(string: "https://example.com")! // <-- REPLACE
+            ErrorUpdateConfig(
+                // Serwer testowy: TestServer/prepare.sh + TestServer/start.sh
+                // W produkcji podmień na własny adres HTTPS.
+                serverURL: URL(string: "http://127.0.0.1:8000")!,
+                // Klucz publiczny Ed25519 z keys/errorupdate_public_key.txt
+                publicKey: Data(base64Encoded: "7//lOtdipV7KeuhNZ/wksRLeE9mgtJmMd4oXGfxhaME=") ?? Data()
+            )
         )
-        #endif
+        ErrorUpdateManager.shared.setupCrashHandling()
     }
 }
 
@@ -25,27 +30,17 @@ struct MyApp: App {
     }
 }
 
-// ViewModel to manage the state of our view
-class ContentViewModel: ObservableObject {
-    @Published var updateInfo: UpdateInfo?
-    @Published var isCheckingForUpdate = false
-    
-    let currentVersion = ErrorUpdateManager.shared.currentVersion ?? "N/A"
-    
-    func checkForUpdate() async {
-        isCheckingForUpdate = true
-        await ErrorUpdateManager.shared.checkForUpdates()
-        isCheckingForUpdate = false
-    }
-}
-
 struct ContentView: View {
-    @StateObject private var viewModel = ContentViewModel()
+    @ObservedObject private var manager = ErrorUpdateManager.shared
+    @State private var isCheckingForUpdate = false
+    @State private var isDownloading = false
     @State private var showingErrorHistory = false
+
+    private var currentVersion: String { manager.currentVersion ?? "N/A" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            
+
             // Header
             HStack(spacing: 12) {
                 Image("logo do okna")
@@ -53,59 +48,86 @@ struct ContentView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 36, height: 36)
                     .foregroundStyle(.secondary)
-                
+
                 Text("ErrorUpdate")
                     .font(.system(size: 32, weight: .bold))
             }
             .padding(.bottom, 10)
-            
+
             // Updates Section
             VStack(alignment: .leading) {
                 Text("Aktualizacje")
                     .font(.title2.bold())
-                
+
                 HStack {
                     Button("Sprawdź dostępność") {
-                        Task { await viewModel.checkForUpdate() }
+                        Task {
+                            isCheckingForUpdate = true
+                            await manager.checkForUpdates()
+                            isCheckingForUpdate = false
+                        }
                     }
-                        .disabled(viewModel.isCheckingForUpdate)
-                    
-                    if viewModel.isCheckingForUpdate {
+                    .disabled(isCheckingForUpdate)
+
+                    if isCheckingForUpdate {
                         ProgressView().scaleEffect(0.5, anchor: .leading)
                     }
-                    
+
                     Spacer()
-                    
-                    Button("Pobierz") { /* Download action */ }
-                        .disabled(viewModel.updateInfo == nil)
+
+                    if let update = manager.availableUpdate {
+                        Text("Dostępna wersja \(update.latestVersion)")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button(isDownloading ? "Pobieranie…" : "Pobierz") {
+                        Task {
+                            isDownloading = true
+                            await manager.downloadUpdate()
+                            isDownloading = false
+                        }
+                    }
+                    .disabled(manager.availableUpdate == nil || isDownloading)
                 }
             }
-            
+
             Divider()
 
             // Errors Section
             VStack(alignment: .leading) {
                 Text("Błędy programu")
                     .font(.title2.bold())
-                
+
                 HStack {
                     Button("Historia błędów") { showingErrorHistory = true }
+
+                    if manager.pendingReportsCount > 0 {
+                        Text("\(manager.pendingReportsCount)")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(.red.opacity(0.8)))
+                            .foregroundStyle(.white)
+                    }
+
                     Spacer()
-                    Button("Wyślij raport") {
-                        enum SampleError: Error, LocalizedError { case manualReport }
+
+                    Button("Zgłoś przykładowy błąd") {
+                        enum SampleError: Error, LocalizedError {
+                            case manualReport
+                            var errorDescription: String? { "Przykładowy błąd zgłoszony ręcznie" }
+                        }
                         ErrorUpdateManager.shared.logError(SampleError.manualReport)
                     }
                 }
             }
-            
+
             Spacer() // Pushes content to the top
         }
         .padding(30)
         .frame(minWidth: 400, idealWidth: 450, maxWidth: .infinity, minHeight: 300, idealHeight: 350, maxHeight: .infinity)
         .sheet(isPresented: $showingErrorHistory) {
-            if #available(macOS 11.0, *) {
-                ErrorHistoryView()
-            }
+            ErrorHistoryView()
         }
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {

@@ -5,22 +5,35 @@ import CryptoKit
 
 // MARK: - URLProtocol mock
 
-private struct TestURLProtocol: URLProtocol {
-    private let response: (data: Data, response: HTTPURLResponse)
+/// Serves a canned response for every request. The payload is registered
+/// per-URL in `responses` because URLProtocol instances are created by the system.
+private final class TestURLProtocol: URLProtocol {
 
-    init(data: Data, statusCode: Int = 200) {
-        let headers = ["Content-Type": "application/octet-stream"]
-        self.response = (data, HTTPURLResponse(
-            url: URL(string: "https://example.com/update.zip")!,
-            statusCode: statusCode, httpVersion: nil, headerFields: headers)!)
+    nonisolated(unsafe) static var responseData = Data()
+    private static let lock = NSLock()
+
+    static func setResponse(_ data: Data) {
+        lock.lock()
+        responseData = data
+        lock.unlock()
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        client?.urlProtocol(self, didLoad: response.data)
-        client?.urlProtocol(self, didReceive: response.response, cacheStoragePolicy: .notAllowed)
+        Self.lock.lock()
+        let data = Self.responseData
+        Self.lock.unlock()
+
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://example.com/update.zip")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/octet-stream"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
     }
 
@@ -28,6 +41,7 @@ private struct TestURLProtocol: URLProtocol {
 }
 
 private func testSession(response: Data) -> URLSession {
+    TestURLProtocol.setResponse(response)
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [TestURLProtocol.self]
     return URLSession(configuration: config)
@@ -36,12 +50,12 @@ private func testSession(response: Data) -> URLSession {
 // MARK: - Helpers
 
 private func sha256hex(_ data: Data) -> String {
-    SHA256.hash(data: data).compactMap { String(format: "%02x", $0) }.joined()
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
 // MARK: - Tests
 
-@Suite struct UpdateDownloaderTests {
+@Suite(.serialized) struct UpdateDownloaderTests {
     private func makeConfig(publicKey: Data = .init()) -> ErrorUpdateConfig {
         ErrorUpdateConfig(serverURL: URL(string: "https://example.com/check")!,
                           publicKey: publicKey, reportingOptIn: false)
@@ -52,12 +66,11 @@ private func sha256hex(_ data: Data) -> String {
     @Test func download_validSha256AndSignature_succeeds() async throws {
         let payload = Data([1, 2, 3, 4])
         let session = testSession(response: payload)
-        let keyPair = try Curve25519.Signing.PrivateKey()
+        let keyPair = Curve25519.Signing.PrivateKey()
         let signature = try keyPair.signature(for: payload)
-        let sigBase64 = signature.rawRepresentation.base64EncodedString()
-        let pubKey = try Curve25519.Signing.PublicKey(rawRepresentation: keyPair.publicKey.rawRepresentation)
+        let sigBase64 = signature.base64EncodedString()
 
-        let config = makeConfig(publicKey: pubKey.rawRepresentation)
+        let config = makeConfig(publicKey: keyPair.publicKey.rawRepresentation)
         let info = UpdateInfo(
             latestVersion: "2.0.0", available: true, releaseNotes: "New!",
             downloadURL: URL(string: "https://example.com/update.zip")!,
@@ -93,20 +106,19 @@ private func sha256hex(_ data: Data) -> String {
 
     // MARK: 3. Poprawny SHA-256, ale zły podpis Ed25519 → odrzucenie
 
-    @Test func download_correctSha256BadSignature_rejected() async {
+    @Test func download_correctSha256BadSignature_rejected() async throws {
         let payload = Data([1, 2, 3, 4])
         let session = testSession(response: payload)
 
         // Podpis wygenerowany kluczem A
-        let keyPairA = try! Curve25519.Signing.PrivateKey()
-        let signature = try! keyPairA.signature(for: payload)
-        let sigBase64 = signature.rawRepresentation.base64EncodedString()
+        let keyPairA = Curve25519.Signing.PrivateKey()
+        let signature = try keyPairA.signature(for: payload)
+        let sigBase64 = signature.base64EncodedString()
 
         // Weryfikacja kluczem B (niepasującym)
-        let keyPairB = try! Curve25519.Signing.PrivateKey()
-        let wrongPubKey = try! Curve25519.Signing.PublicKey(rawRepresentation: keyPairB.publicKey.rawRepresentation)
+        let keyPairB = Curve25519.Signing.PrivateKey()
 
-        let config = makeConfig(publicKey: wrongPubKey.rawRepresentation)
+        let config = makeConfig(publicKey: keyPairB.publicKey.rawRepresentation)
         let info = UpdateInfo(
             latestVersion: "2.0.0", available: true, releaseNotes: "New!",
             downloadURL: URL(string: "https://example.com/update.zip")!,
@@ -121,7 +133,7 @@ private func sha256hex(_ data: Data) -> String {
         }
     }
 
-    // MARK: Brak klucza publicznego → pomija weryfikację podpisu
+    // MARK: 4. Brak klucza publicznego → pomija weryfikację podpisu
 
     @Test func download_noPublicKey_skipsSignatureCheck() async throws {
         let payload = Data([1, 2, 3])
