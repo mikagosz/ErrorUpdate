@@ -5,7 +5,8 @@
 DerivedData/
 *.xcuserdata/
 xcuserdata/
-ErrorUpdate/.build/
+.build/
+.swiftpm/
 
 # Klucze podpisujące aktualizacje — NIGDY nie commitować klucza prywatnego
 keys/

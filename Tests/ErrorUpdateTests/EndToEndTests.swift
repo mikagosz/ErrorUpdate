@@ -4,13 +4,12 @@ import Foundation
 
 /// Full check → download → verify → install cycle against a real local HTTP server.
 ///
-/// Skipped unless `ERRORUPDATE_E2E_SERVER` is set. To run:
+/// Skipped unless `ERRORUPDATE_E2E_SERVER` is set. To run (from the repo root):
 /// ```bash
 /// ./TestServer/prepare.sh
 /// (cd TestServer/www && python3 -m http.server 8000) &
-/// cd ErrorUpdate
 /// ERRORUPDATE_E2E_SERVER=http://127.0.0.1:8000 \
-/// ERRORUPDATE_E2E_PUBKEY=$(cat ../keys/errorupdate_public_key.txt) \
+/// ERRORUPDATE_E2E_PUBKEY=$(cat keys/errorupdate_public_key.txt) \
 /// swift test --filter EndToEndTests
 /// ```
 @Suite struct EndToEndTests {

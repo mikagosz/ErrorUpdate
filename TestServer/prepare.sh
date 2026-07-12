@@ -14,8 +14,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WWW="$ROOT/TestServer/www"
 VERSION="9.9.9"
 
+if [ ! -f "$ROOT/keys/errorupdate_private_key.txt" ]; then
+    echo "==> Brak kluczy — generuję parę Ed25519 w keys/ ..."
+    (cd "$ROOT" && swift run -c release errorupdate-tool keygen --out keys)
+fi
+
 echo "==> Buduję aplikację demo..."
-xcodebuild -project "$ROOT/ErrorUpdate.xcodeproj" -scheme ErrorUpdate \
+xcodebuild -project "$ROOT/DemoApp/ErrorUpdate.xcodeproj" -scheme ErrorUpdate \
     -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath "$ROOT/TestServer/.build" -quiet build
 
@@ -27,7 +32,7 @@ rm -f "$WWW/downloads/ErrorUpdate-$VERSION.zip"
 ditto -c -k --keepParent "$APP" "$WWW/downloads/ErrorUpdate-$VERSION.zip"
 
 echo "==> Generuję manifest (SHA-256 + podpis Ed25519)..."
-cd "$ROOT/ErrorUpdate"
+cd "$ROOT"
 swift run -c release errorupdate-tool release \
     --file "$WWW/downloads/ErrorUpdate-$VERSION.zip" \
     --version "$VERSION" \

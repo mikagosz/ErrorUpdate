@@ -13,12 +13,13 @@ i bez płatnego konta Apple Developer.
 # 2. Uruchom serwer (zostaw działający w terminalu)
 ./TestServer/start.sh
 
-# 3. Uruchom aplikację demo z Xcode i kliknij "Sprawdź dostępność"
-#    — aplikacja zobaczy "wersję 9.9.9", pobierze ją i będzie mogła zainstalować.
+# 3. Uruchom aplikację demo (DemoApp/ErrorUpdate.xcodeproj) i kliknij
+#    "Sprawdź dostępność" — aplikacja zobaczy "wersję 9.9.9" i pobierze ją.
 ```
 
-Aplikacja demo jest już skonfigurowana na `http://127.0.0.1:8000`
-(patrz `MyApp/ContentView.swift`) z kluczem publicznym z `keys/`.
+Skrypt sam wygeneruje klucze Ed25519 w `keys/`, jeśli ich jeszcze nie ma.
+Aplikacja demo jest skonfigurowana na `http://127.0.0.1:8000`
+(patrz `DemoApp/MyApp/ContentView.swift`).
 
 ## Struktura serwera
 
@@ -33,11 +34,10 @@ wystarczy dowolny serwer statycznych plików (GitHub Pages, dowolny hosting www)
 Przy publikacji nowej wersji swojego programu użyj:
 
 ```bash
-cd ErrorUpdate
 swift run errorupdate-tool release \
     --file MojaApka-1.2.0.zip --version 1.2.0 \
     --url https://twoj-serwer.com/downloads/MojaApka-1.2.0.zip \
-    --key ../keys/errorupdate_private_key.txt \
+    --key keys/errorupdate_private_key.txt \
     --notes "Co nowego..." \
     --out version-check
 ```

@@ -1,29 +1,39 @@
-# ErrorUpdate Framework
+# ErrorUpdate
 
 [![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager/)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)](https://www.apple.com/macos)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Overview
+A lightweight, zero-dependency Swift package that adds **crash/error reporting**
+and **self-updating** to macOS apps distributed outside the App Store —
+**no paid Apple Developer account required**.
 
-`ErrorUpdate` is a lightweight, zero-dependency Swift package for macOS applications that provides a comprehensive solution for error reporting and application updates.
+> Status: **0.1.x (beta)** — used in the author's own apps. Feedback and issues welcome.
 
-### Features
+## Features
 
 - **Automatic Crash Reporting:** Captures native Objective-C exceptions and fatal signals (e.g. `SIGSEGV`) using async-signal-safe file writes; the crash is turned into a report on the next launch.
 - **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context.
 - **Local Report Store:** Reports are persisted on disk and deduplicated (identical errors within 24 h merge into one entry with a counter).
 - **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff.
-- **Verified Downloads:** Updates are verified with SHA-256 and, optionally, an Ed25519 signature before installation. The app bundle's code signature is checked with `codesign` before it replaces the old version.
+- **Verified Downloads:** Updates are verified with SHA-256 and, optionally, an Ed25519 signature before installation. The app bundle's code signature is checked with `codesign` before it replaces the old version (works with ad-hoc signed apps — no paid account needed).
+- **Safe Install & Relaunch:** The previous version is kept as a backup until the copy succeeds; the app can relaunch into the new version.
 - **SwiftUI Integration:** `ErrorUpdateManager` is an `ObservableObject` — bind `pendingReports` and `availableUpdate` directly to your views. Ready-made dialogs (`UIPresenter`) are also included.
-- **Customizable:** Use `ErrorUpdateDelegate` to hook into the error and update lifecycle.
+- **Static Hosting Friendly:** The "server" is just two static files — works with GitHub Pages/Releases or any file host.
+- **Release CLI:** `errorupdate-tool` generates signing keys and release manifests.
 
 ## Installation
 
-Add `ErrorUpdate` to your Xcode project using the Swift Package Manager:
+In Xcode: **File → Add Package Dependencies...** and enter this repository's URL,
+then add the `ErrorUpdate` library to your app target.
 
-1. In Xcode, open your project and navigate to **File > Add Package Dependencies...**
-2. Enter the repository URL (or use **Add Local...** and select this package's folder).
-3. Add the `ErrorUpdate` library to your app's target.
+Or in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/YOUR-LOGIN/ErrorUpdate.git", from: "0.1.0"),
+]
+```
 
 > **Note:** If your app target is also named `ErrorUpdate`, set a different
 > **Product Module Name** in the target's build settings so the app can import the library.
@@ -31,29 +41,18 @@ Add `ErrorUpdate` to your Xcode project using the Swift Package Manager:
 ## Basic Usage
 
 For detailed instructions, see [INTEGRATION_GUIDE.md](INTEGRATION_GUIDE.md).
+A complete working app is in [DemoApp/](DemoApp/).
 
 ```swift
 import SwiftUI
 import ErrorUpdate
-
-@main
-struct YourApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-        }
-    }
-}
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         ErrorUpdateManager.shared.configure(
             ErrorUpdateConfig(
                 serverURL: URL(string: "https://your-server.com")!,
-                appID: "com.yourcompany.appname",
-                apiKey: "your-secret-key"
+                publicKey: Data(base64Encoded: "YOUR-ED25519-PUBLIC-KEY")!
             )
         )
 
@@ -68,7 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 ## Server API
 
-The framework expects two endpoints under `serverURL`:
+The framework expects two endpoints under `serverURL` — both can be plain static files:
 
 - `GET /api/error-update/version-check` — returns JSON:
   ```json
@@ -81,47 +80,58 @@ The framework expects two endpoints under `serverURL`:
     "mandatory": false
   }
   ```
-- `POST /api/error-update/report` — receives an `ErrorReport` as JSON.
+- `POST /api/error-update/report` — receives an `ErrorReport` as JSON
+  (optional; without a dynamic server, reports stay local and can be emailed by the user).
 
-Both requests carry `X-App-ID`, `X-API-Key` and `X-Current-Version` headers.
+Requests carry `X-App-ID`, `X-API-Key` and `X-Current-Version` headers.
 
 ## Release Tooling
 
-The package ships with a CLI helper:
-
 ```bash
 # One-time: generate an Ed25519 signing key pair (private key stays local!)
-swift run errorupdate-tool keygen --out ../keys
+swift run errorupdate-tool keygen --out keys
 
 # For every release: compute SHA-256 + signature and produce the manifest
 swift run errorupdate-tool release \
     --file MyApp-1.2.0.zip --version 1.2.0 \
     --url https://myserver.com/downloads/MyApp-1.2.0.zip \
-    --key ../keys/errorupdate_private_key.txt \
+    --key keys/errorupdate_private_key.txt \
     --notes "What's new" --out version-check
 ```
 
 Upload `version-check` (as `<serverURL>/api/error-update/version-check`) and the
-ZIP to any static file host — no dynamic server needed.
+ZIP to any static file host.
 
 ## Local Test Server
 
-`TestServer/` in the repository root contains scripts that build the demo app,
-package it as "version 9.9.9" and serve it from `http://127.0.0.1:8000`
-(`prepare.sh` + `start.sh`), so the full update cycle can be tested without any
-hosting. The end-to-end test (`EndToEndTests`) runs against it:
+[TestServer/](TestServer/) contains scripts that build the demo app, package it
+as "version 9.9.9" and serve it from `http://127.0.0.1:8000`, so the full update
+cycle can be tested without any hosting:
 
 ```bash
 ./TestServer/prepare.sh
-./TestServer/start.sh &
-cd ErrorUpdate
+./TestServer/start.sh
+# then run DemoApp and click "Check for updates"
+```
+
+The end-to-end test runs the whole cycle (check → download → verify → install)
+against that server:
+
+```bash
 ERRORUPDATE_E2E_SERVER=http://127.0.0.1:8000 \
-ERRORUPDATE_E2E_PUBKEY=$(cat ../keys/errorupdate_public_key.txt) \
+ERRORUPDATE_E2E_PUBKEY=$(cat keys/errorupdate_public_key.txt) \
 swift test --filter EndToEndTests
 ```
 
-## Requirements
+## Requirements & Limitations
 
 - macOS 13+
-- App Sandbox must be **disabled** for the update installer to replace the app bundle
-  (error reporting works fine in sandboxed apps).
+- The update installer replaces the app bundle on disk, so it does **not** work
+  inside the App Sandbox (error reporting works fine in sandboxed apps).
+  Apps distributed through the App Store must use App Store updates instead.
+- Ed25519 signature verification is skipped when no public key is configured —
+  always configure it for production.
+
+## License
+
+[MIT](LICENSE)
