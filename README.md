@@ -1,12 +1,19 @@
-# ErrorUpdate
+<p align="center">
+  <img src="docs/assets/errorupdate-icon.png" width="160" alt="ErrorUpdate icon">
+</p>
+
+## ErrorUpdate
+
+**Crash reporting and self-updates for macOS apps outside the App Store.**
+No paid Apple Developer account required.
 
 [![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager/)
+[![Swift 6.4](https://img.shields.io/badge/Swift-6.4-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey.svg)](https://www.apple.com/macos)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
-and **self-updating** to macOS apps distributed outside the App Store —
-**no paid Apple Developer account required**.
+and **self-updating** to macOS apps distributed outside the App Store.
 
 > Status: **0.1.x (beta)** — used in the author's own apps. Feedback and issues welcome.
 
