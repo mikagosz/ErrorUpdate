@@ -15,7 +15,16 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **0.1.x (beta)** — used in the author's own apps. Feedback and issues welcome.
+> Status: **0.2.x (beta)** — used in the author's own apps. Feedback and issues welcome.
+>
+> 0.2.0 is a security release and **changes behaviour in ways that can stop
+> updates**: signatures became mandatory, plain HTTP is refused, and an update
+> must now match the running app's bundle identifier and signing identity. Read
+> [Requirements & Limitations](#requirements--limitations) before upgrading.
+> Still beta for one honest reason: the path where a certificate-signed app
+> accepts a legitimately signed update has been reasoned through and unit-tested
+> against a system-signed reference, but not yet exercised across a real release
+> cycle.
 
 ## Features
 
@@ -39,7 +48,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "0.1.0"),
+    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "0.2.0"),
 ]
 ```
 
@@ -125,6 +134,16 @@ cycle can be tested without any hosting:
 ./TestServer/prepare.sh
 ./TestServer/start.sh
 # then run DemoApp and click "Check for updates"
+```
+
+The demo app is ad-hoc signed by default, which means the installer skips the
+signing-identity check (see the limitations below). To exercise the full
+verification path, build it with your own certificate — the identity is never
+committed:
+
+```bash
+xcodebuild -project DemoApp/ErrorUpdate.xcodeproj -scheme ErrorUpdate \
+    EU_CODE_SIGN_IDENTITY=<your identity from `security find-identity -v -p codesigning`> build
 ```
 
 The end-to-end test runs the whole cycle (check → download → verify → install)
