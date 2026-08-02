@@ -58,13 +58,49 @@ public final class ErrorUpdateManager: ObservableObject {
     // MARK: - Configuration
 
     /// Convenience overload for simple setups.
-    public func configure(serverURL: URL, publicKey: Data = Data(), reportingOptIn: Bool = false) {
-        configure(ErrorUpdateConfig(serverURL: serverURL, publicKey: publicKey, reportingOptIn: reportingOptIn))
+    public func configure(
+        serverURL: URL,
+        publicKey: Data = Data(),
+        allowUnsignedUpdates: Bool = false,
+        reportingOptIn: Bool = false
+    ) {
+        configure(ErrorUpdateConfig(
+            serverURL: serverURL,
+            publicKey: publicKey,
+            allowUnsignedUpdates: allowUnsignedUpdates,
+            reportingOptIn: reportingOptIn
+        ))
     }
 
     /// Configures the framework. Call once, early in the app's lifecycle
     /// (e.g. `applicationDidFinishLaunching`).
     public func configure(_ config: ErrorUpdateConfig) {
+        // Fail at configuration time rather than at the first update check —
+        // this is a mistake the developer can only fix in code.
+        guard URLSecurity.isAcceptable(config.serverURL) else {
+            fputs("""
+                ErrorUpdate: refusing to configure — \
+                \(URLSecurity.rejectionReason(for: config.serverURL)).\n
+                """, stderr)
+            self.config = nil
+            isConfigured = false
+            return
+        }
+
+        // Reconfiguring is a mistake often enough to be worth saying out loud,
+        // and it has to leave no part of the previous setup running: a live
+        // scheduler would otherwise keep firing against the old configuration.
+        let isReconfiguration = isConfigured
+        if isReconfiguration {
+            fputs("""
+                ErrorUpdate: configure() called again — replacing the previous \
+                configuration and stopping the running update schedule.\n
+                """, stderr)
+            updateScheduler.stop()
+            availableUpdate = nil
+            downloadedUpdateURL = nil
+        }
+
         self.config = config
 
         do {
@@ -85,8 +121,11 @@ public final class ErrorUpdateManager: ObservableObject {
 
         isConfigured = true
 
-        // Turn a crash file from the previous run into a report.
-        processPendingCrashFile()
+        // A crash file belongs to the previous run, so it is only worth looking
+        // for on the first configuration.
+        if !isReconfiguration {
+            processPendingCrashFile()
+        }
         refreshPendingReports()
     }
 
@@ -257,7 +296,11 @@ public final class ErrorUpdateManager: ObservableObject {
     }
 
     private func warnNotConfigured() {
-        assertionFailure("ErrorUpdateManager must be configured before use. Call `configure()` first.")
-        fputs("ErrorUpdate: manager used before configure() — call ignored.\n", stderr)
+        // Deliberately not `assertionFailure`: this is a library, and a misuse
+        // of its API is not a reason to kill the integrator's app in Debug.
+        fputs("""
+            ErrorUpdate: manager used before configure() — call ignored. \
+            Call configure() early in the app's lifecycle.\n
+            """, stderr)
     }
 }

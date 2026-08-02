@@ -2,6 +2,14 @@ import Foundation
 
 /// Manages persistence and retrieval of error reports as JSON files
 /// (one file per report, named by the report's UUID).
+///
+/// The directory is read exactly once and then mirrored in memory. Rereading and
+/// re-decoding every file on each save made a crash loop cost quadratic time at
+/// the very moment the app could least afford it, and `fetchAll()` — which the
+/// manager calls on the main actor — paid for the whole directory every time.
+///
+/// The store assumes it is the only writer of its directory; files dropped in
+/// from outside after the first read are not noticed.
 public final class ReportStore: @unchecked Sendable {
 
     private let fileManager = FileManager.default
@@ -12,13 +20,27 @@ public final class ReportStore: @unchecked Sendable {
     /// into a single entry with an incremented `count`.
     private let deduplicationWindow: TimeInterval = 86_400 // 24 h
 
+    /// Upper bound on stored reports; the oldest are dropped past it.
+    ///
+    /// Nothing else bounds them: with `reportingOptIn == false` reports sit on
+    /// disk until the user discards them by hand.
+    private let maxStoredReports: Int
+
+    // Both are only touched on `queue`. `cachedReports` is nil until first use.
+    private var cachedReports: [UUID: ErrorReport]?
+    private var idsByContentHash: [String: UUID] = [:]
+
     enum StoreError: Error {
         case directoryCreationError
     }
 
-    /// - Parameter directory: Custom storage directory (useful for tests).
-    ///   Defaults to `Application Support/<bundle id>/reports`.
-    public init(directory: URL? = nil) throws {
+    /// - Parameters:
+    ///   - directory: Custom storage directory (useful for tests).
+    ///     Defaults to `Application Support/<bundle id>/reports`.
+    ///   - maxStoredReports: How many reports to keep before dropping the oldest.
+    public init(directory: URL? = nil, maxStoredReports: Int = 50) throws {
+        self.maxStoredReports = max(1, maxStoredReports)
+
         if let directory {
             reportsDirectory = directory
         } else if let appSupportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
@@ -36,23 +58,23 @@ public final class ReportStore: @unchecked Sendable {
     public func save(_ report: ErrorReport, completion: (@Sendable () -> Void)? = nil) {
         queue.async {
             do {
-                var reportToSave = report
+                try self.loadIfNeeded()
 
-                let existingReports = try self.fetchAllUnsafe()
-                if let existing = existingReports.first(where: {
-                    $0.contentHash == report.contentHash &&
-                    $0.timestamp.timeIntervalSinceNow > -self.deduplicationWindow
-                }) {
+                var reportToSave = report
+                // One dictionary lookup instead of decoding the whole directory.
+                if let existingID = self.idsByContentHash[report.contentHash],
+                   var existing = self.cachedReports?[existingID],
+                   existing.timestamp.timeIntervalSinceNow > -self.deduplicationWindow {
+                    existing.count += 1
+                    existing.timestamp = Date()
                     reportToSave = existing
-                    reportToSave.count += 1
-                    reportToSave.timestamp = Date()
                 }
 
-                let encoder = JSONEncoder()
-                encoder.dateEncodingStrategy = .iso8601
-                let data = try encoder.encode(reportToSave)
-                let fileURL = self.reportsDirectory.appendingPathComponent("\(reportToSave.id.uuidString).json")
-                try data.write(to: fileURL, options: .atomic)
+                try self.write(reportToSave)
+                self.cachedReports?[reportToSave.id] = reportToSave
+                self.idsByContentHash[reportToSave.contentHash] = reportToSave.id
+
+                self.pruneToLimit()
             } catch {
                 fputs("ErrorUpdate: failed to save report: \(error)\n", stderr)
             }
@@ -64,7 +86,8 @@ public final class ReportStore: @unchecked Sendable {
     public func fetchAll() -> [ErrorReport] {
         queue.sync {
             do {
-                return try fetchAllUnsafe().sorted { $0.timestamp > $1.timestamp }
+                try loadIfNeeded()
+                return (cachedReports ?? [:]).values.sorted { $0.timestamp > $1.timestamp }
             } catch {
                 fputs("ErrorUpdate: failed to fetch reports: \(error)\n", stderr)
                 return []
@@ -75,22 +98,64 @@ public final class ReportStore: @unchecked Sendable {
     /// Removes a report after it was successfully delivered.
     public func markAsSent(_ id: UUID, completion: (@Sendable () -> Void)? = nil) {
         queue.async {
-            let fileURL = self.reportsDirectory.appendingPathComponent("\(id.uuidString).json")
-            try? self.fileManager.removeItem(at: fileURL)
+            try? self.fileManager.removeItem(at: self.fileURL(for: id))
+            self.forget(id)
             completion?()
         }
     }
 
-    // Must only be called on `queue`.
-    private func fetchAllUnsafe() throws -> [ErrorReport] {
+    // MARK: - Private (queue only)
+
+    private func loadIfNeeded() throws {
+        guard cachedReports == nil else { return }
+
         let fileURLs = try fileManager.contentsOfDirectory(at: reportsDirectory, includingPropertiesForKeys: nil)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        return fileURLs.compactMap { url in
-            guard url.pathExtension == "json",
-                  let data = try? Data(contentsOf: url) else { return nil }
-            return try? decoder.decode(ErrorReport.self, from: data)
+        var reports: [UUID: ErrorReport] = [:]
+        for url in fileURLs where url.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let report = try? decoder.decode(ErrorReport.self, from: data) else { continue }
+            reports[report.id] = report
         }
+
+        cachedReports = reports
+        // Newest wins, so a fresh duplicate merges into the most recent entry.
+        idsByContentHash = [:]
+        for report in reports.values.sorted(by: { $0.timestamp < $1.timestamp }) {
+            idsByContentHash[report.contentHash] = report.id
+        }
+    }
+
+    private func write(_ report: ErrorReport) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(report)
+        try data.write(to: fileURL(for: report.id), options: .atomic)
+    }
+
+    private func pruneToLimit() {
+        guard let reports = cachedReports, reports.count > maxStoredReports else { return }
+
+        let oldest = reports.values
+            .sorted { $0.timestamp > $1.timestamp }
+            .dropFirst(maxStoredReports)
+
+        for report in oldest {
+            try? fileManager.removeItem(at: fileURL(for: report.id))
+            forget(report.id)
+        }
+    }
+
+    private func forget(_ id: UUID) {
+        guard let report = cachedReports?.removeValue(forKey: id) else { return }
+        if idsByContentHash[report.contentHash] == id {
+            idsByContentHash.removeValue(forKey: report.contentHash)
+        }
+    }
+
+    private func fileURL(for id: UUID) -> URL {
+        reportsDirectory.appendingPathComponent("\(id.uuidString).json")
     }
 }

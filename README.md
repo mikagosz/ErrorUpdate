@@ -23,7 +23,8 @@ and **self-updating** to macOS apps distributed outside the App Store.
 - **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context.
 - **Local Report Store:** Reports are persisted on disk and deduplicated (identical errors within 24 h merge into one entry with a counter).
 - **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff.
-- **Verified Downloads:** Updates are verified with SHA-256 and, optionally, an Ed25519 signature before installation. The app bundle's code signature is checked with `codesign` before it replaces the old version (works with ad-hoc signed apps — no paid account needed).
+- **Verified Downloads:** Authenticity comes from the Ed25519 signature — once a public key is configured, an update without a valid signature is refused, and a manifest that omits the signature cannot turn the check off. SHA-256 catches a corrupted transfer only, since the checksum arrives from the same manifest as the download URL.
+- **Same-App, Same-Signer Install:** Before an update replaces the running app, its `CFBundleIdentifier` must match and its code signature must satisfy the running app's designated requirement. See the limitations below for what this cannot do for ad-hoc signed apps.
 - **Safe Install & Relaunch:** The previous version is kept as a backup until the copy succeeds; the app can relaunch into the new version.
 - **SwiftUI Integration:** `ErrorUpdateManager` is an `ObservableObject` — bind `pendingReports` and `availableUpdate` directly to your views. Ready-made dialogs (`UIPresenter`) are also included.
 - **Static Hosting Friendly:** The "server" is just two static files — works with GitHub Pages/Releases or any file host.
@@ -80,9 +81,10 @@ The framework expects two endpoints under `serverURL` — both can be plain stat
   ```json
   {
     "latestVersion": "1.2.0",
+    "available": true,
     "downloadURL": "https://your-server.com/downloads/App-1.2.0.zip",
     "sha256": "<hex sha256 of the file>",
-    "signature": "<base64 Ed25519 signature, optional>",
+    "signature": "<base64 Ed25519 signature, required when the app configures a public key>",
     "releaseNotes": "What's new…",
     "mandatory": false
   }
@@ -91,6 +93,10 @@ The framework expects two endpoints under `serverURL` — both can be plain stat
   (optional; without a dynamic server, reports stay local and can be emailed by the user).
 
 Requests carry `X-App-ID`, `X-API-Key` and `X-Current-Version` headers.
+
+`available` defaults to `true` when absent; set it to `false` (or pass
+`--unavailable` to the release tool) to publish a manifest without offering the
+update yet. Apps will not report it until the flag flips back.
 
 ## Release Tooling
 
@@ -130,14 +136,63 @@ ERRORUPDATE_E2E_PUBKEY=$(cat keys/errorupdate_public_key.txt) \
 swift test --filter EndToEndTests
 ```
 
+## What a Report Contains
+
+Every stored report carries:
+
+| Field | Notes |
+|---|---|
+| `errorMessage` | Exception reason or `localizedDescription` — may quote user data your app put in the error |
+| `stackTrace` | `Thread.callStackSymbols`. **On macOS these frames include file paths, and a path under `/Users/<name>/` discloses the account name.** |
+| `appVersion`, `osVersion` | — |
+| `systemInfo` | CPU model, RAM, free disk space |
+| `customContext` | Whatever your app passes to `logError(_:context:)` |
+| `contactEmail` | Only when the user types it into the report dialog |
+
+Reports stay on the user's disk until they are sent or discarded. **With
+`reportingOptIn: true` all of the above is uploaded to your server
+automatically, without asking the user each time** — so treat that switch as a
+consent decision and describe the collection in your privacy policy. The email
+route (`UIPresenter`) is different: the user sees the report and presses send.
+
+If you cannot disclose account names, strip the home-directory prefix from
+`stackTrace` before sending, or keep `reportingOptIn: false` and let users
+submit reports by mail.
+
 ## Requirements & Limitations
 
 - macOS 13+
 - The update installer replaces the app bundle on disk, so it does **not** work
   inside the App Sandbox (error reporting works fine in sandboxed apps).
   Apps distributed through the App Store must use App Store updates instead.
-- Ed25519 signature verification is skipped when no public key is configured —
-  always configure it for production.
+- **Downloads are capped at `maxDownloadBytes` (1 GB by default).** The transfer
+  is cancelled as soon as it passes the limit, or immediately when the server
+  announces a larger `Content-Length` — verification can only run on a file that
+  already exists, so the size has to be bounded while it arrives.
+- **HTTPS is required.** `configure()` refuses a plain-HTTP `serverURL`, and a
+  download URL that is not HTTPS is rejected even when the manifest itself
+  arrived over HTTPS. Loopback (`localhost`, `127.0.0.1`, `::1`) stays allowed
+  so the bundled test server works.
+- **Signatures are mandatory once `publicKey` is set.** An update whose manifest
+  has no `signature`, or whose signature does not verify, is rejected — the
+  server cannot switch verification off by omitting the field.
+- **Running without a public key requires `allowUnsignedUpdates: true`.**
+  In that mode an update is only checked against a checksum the same server
+  supplies, which protects against a corrupted transfer and nothing else.
+  Anyone who can serve the manifest can serve the app.
+- **`codesign` proves origin only for apps signed with a certificate.** The
+  installer requires the update to satisfy the running app's designated
+  requirement. For an ad-hoc signed app that requirement pins one build's
+  `cdhash`, which no later version can ever satisfy, so the check is skipped
+  with a warning on stderr — for ad-hoc apps authenticity rests entirely on the
+  Ed25519 signature. A self-signed certificate is enough to get a stable
+  requirement; no paid account is needed.
+- **The installed app keeps the name of the app it replaces.** Renaming the
+  bundle between releases has no effect on disk; the `CFBundleIdentifier` must
+  stay the same across versions or the update is rejected.
+- Changing the signing certificate (expiry, or moving from ad-hoc to a
+  certificate) breaks the requirement match. Ship that transition as a manual
+  download, not as an update.
 
 ## License
 

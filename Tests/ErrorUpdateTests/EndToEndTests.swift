@@ -24,7 +24,10 @@ import Foundation
         let publicKey = ProcessInfo.processInfo.environment["ERRORUPDATE_E2E_PUBKEY"]
             .flatMap { Data(base64Encoded: $0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? Data()
 
-        let config = ErrorUpdateConfig(serverURL: serverURL, publicKey: publicKey)
+        // Without ERRORUPDATE_E2E_PUBKEY the run exercises the explicitly
+        // unverified path; with it, signatures are mandatory.
+        let config = ErrorUpdateConfig(serverURL: serverURL, publicKey: publicKey,
+                                       allowUnsignedUpdates: publicKey.isEmpty)
         let client = ServerClient(config: config, currentVersion: "1.0")
         let checker = UpdateChecker(serverClient: client, currentVersion: "1.0")
 

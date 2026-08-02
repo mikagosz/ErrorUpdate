@@ -94,6 +94,54 @@ import Foundation
         #expect(saved.count == 0)
     }
 
+    // MARK: 5. Liczba raportów nie rośnie bez ograniczeń
+
+    @Test func save_pastLimit_keepsNewestAndDropsOldest() async throws {
+        let dir = try testDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = try ReportStore(directory: dir, maxStoredReports: 10)
+
+        // 25 różnych błędów — każdy z własnym contentHash, więc nic się nie scala.
+        for index in 0..<25 {
+            await save(makeReport(contentHash: "hash-\(index)",
+                                  timestamp: Date().addingTimeInterval(Double(index))),
+                       to: store)
+        }
+
+        let saved = store.fetchAll()
+        #expect(saved.count == 10, "Oczekiwano 10 raportów, jest \(saved.count)")
+
+        // Zostają najnowsze, czyli te o najwyższych indeksach.
+        let survivingHashes = Set(saved.map(\.contentHash))
+        #expect(survivingHashes == Set((15..<25).map { "hash-\($0)" }))
+
+        // Na dysku też, nie tylko w pamięci.
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasSuffix(".json") }
+        #expect(files.count == 10, "Na dysku zostało \(files.count) plików")
+    }
+
+    // MARK: 6. Deduplikacja działa po ponownym otwarciu magazynu
+    //
+    // Indeks skrótów jest budowany w pamięci, więc musi odtworzyć się z dysku —
+    // inaczej po restarcie aplikacji ten sam błąd zakładałby nowy wpis.
+
+    @Test func deduplication_worksAfterReopeningStore() async throws {
+        let dir = try testDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let first = try ReportStore(directory: dir)
+        await save(makeReport(), to: first)
+
+        let second = try ReportStore(directory: dir)
+        await save(makeReport(), to: second)
+
+        let saved = second.fetchAll()
+        #expect(saved.count == 1, "Oczekiwano jednego wpisu, jest \(saved.count)")
+        #expect(saved[0].count == 2)
+    }
+
     // MARK: - Helpers
 
     /// Saves and waits for the asynchronous write to complete.

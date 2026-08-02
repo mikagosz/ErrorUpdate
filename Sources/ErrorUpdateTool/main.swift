@@ -41,9 +41,11 @@ func printUsage() {
       errorupdate-tool release --file <App.zip|App.dmg> --version <X.Y.Z>
                                --url <download URL> [--key <private key file>]
                                [--notes <release notes>] [--mandatory]
-                               [--out <manifest path>]
+                               [--unavailable] [--out <manifest path>]
           Computes the SHA-256 checksum (and Ed25519 signature when --key is
           given) of the update file and writes the version-check JSON manifest.
+          --unavailable publishes the manifest without offering the update yet
+          (apps will not report it until the flag is removed).
           Default --out: ./version-check
 
     EXAMPLE:
@@ -139,7 +141,7 @@ func runRelease() {
 
     let manifest: [String: Any] = [
         "latestVersion": version,
-        "available": true,
+        "available": !hasFlag("--unavailable"),
         "releaseNotes": value(for: "--notes") ?? "",
         "downloadURL": downloadURL,
         "sha256": sha256,
@@ -153,9 +155,19 @@ func runRelease() {
 
     do {
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: outURL)
+        // Atomic: an interrupted run must not leave a half-written manifest
+        // on the server for apps to fetch.
+        try data.write(to: outURL, options: .atomic)
     } catch {
         fail("could not write manifest: \(error.localizedDescription)")
+    }
+
+    if signature.isEmpty {
+        FileHandle.standardError.write(Data("""
+            UWAGA: manifest bez podpisu. Aplikacja ze skonfigurowanym kluczem publicznym \
+            odrzuci taką aktualizację, a aplikacja bez klucza przyjmie dowolny plik, \
+            który poda ten serwer. Podpisz wydanie przez --key.\n
+            """.utf8))
     }
 
     print("""
@@ -163,6 +175,7 @@ func runRelease() {
       wersja:  \(version)
       sha256:  \(sha256)
       podpis:  \(signature.isEmpty ? "(brak — użyj --key aby podpisać)" : "Ed25519 OK")
+      dostępna: \(hasFlag("--unavailable") ? "nie (--unavailable)" : "tak")
     """)
 }
 

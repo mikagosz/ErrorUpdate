@@ -127,7 +127,7 @@ private struct UpdateAvailableWindowContent: View {
             },
             onLater: onClose,
             onSkip: {
-                UserDefaults.standard.set(updateInfo.latestVersion, forKey: "ErrorUpdate_SkippedVersion")
+                SkippedVersionStore().skip(updateInfo.latestVersion)
                 onClose()
             }
         )

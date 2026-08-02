@@ -11,6 +11,7 @@ final class UpdateChecker: @unchecked Sendable {
     private let serverClient: ServerClient
     private let currentVersion: String
     private let userDefaults: UserDefaults
+    private let skippedVersions: SkippedVersionStore
 
     private let cacheInterval: TimeInterval = 3600 // 1 hour
     private let lastCheckKey = "ErrorUpdate_LastUpdateCheckDate"
@@ -22,13 +23,15 @@ final class UpdateChecker: @unchecked Sendable {
         self.serverClient = serverClient
         self.currentVersion = currentVersion
         self.userDefaults = userDefaults
+        self.skippedVersions = SkippedVersionStore(defaults: userDefaults)
     }
 
     /// Checks for updates. Returns `UpdateInfo` when a newer version is available, `nil` otherwise.
     ///
     /// - Parameter force: When `false`, the check is skipped if one already ran within
-    ///   the last hour (used by the periodic scheduler). Manual, user-initiated checks
-    ///   should pass `true`.
+    ///   the last hour (used by the periodic scheduler), and a version the user
+    ///   dismissed with "Never Ask Again" is not reported. Manual, user-initiated
+    ///   checks should pass `true`: someone who asks for a check wants the answer.
     ///
     /// Network failures are retried up to 3 times with exponential backoff (2s, 4s, 8s).
     func checkForUpdates(force: Bool = false) async throws -> UpdateInfo? {
@@ -44,10 +47,20 @@ final class UpdateChecker: @unchecked Sendable {
                 let info = try await serverClient.fetchVersionInfo()
                 userDefaults.set(Date(), forKey: lastCheckKey)
 
-                if Self.isVersion(info.latestVersion, greaterThan: currentVersion) {
-                    return info
+                // The server can publish a version without offering it yet
+                // (staged rollout, a release pulled back). Unlike a version the
+                // user skipped, this is not something a forced check overrides.
+                guard info.available else { return nil }
+
+                guard Self.isVersion(info.latestVersion, greaterThan: currentVersion) else {
+                    return nil
                 }
-                return nil
+                // A version the user dismissed stays dismissed until a newer
+                // one shows up — but never for a check the user asked for.
+                if !force, skippedVersions.shouldSuppress(info.latestVersion) {
+                    return nil
+                }
+                return info
             } catch {
                 lastError = error
                 if attempt < maxRetries - 1 {
