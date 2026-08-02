@@ -21,11 +21,13 @@ and **self-updating** to macOS apps distributed outside the App Store.
 > updates**: signatures became mandatory, plain HTTP is refused, and an update
 > must now match the running app's bundle identifier and signing identity. Read
 > [Requirements & Limitations](#requirements--limitations) before upgrading.
-> Still beta because the full check → download → install → relaunch cycle has not
-> been run against a live server outside the author's machine, and the crash
-> handlers have not been exercised by a real fatal signal. The signing checks
-> themselves are covered both ways: a foreign bundle is rejected, and an update
-> signed by the same certificate is accepted (see the opt-in test below).
+> The check → download → install cycle has been run end to end against a live
+> server, in both directions: a legitimate update installs, and a package with a
+> valid SHA-256 **and** a valid Ed25519 signature is still rejected when its code
+> signature comes from a different identity. Still beta because `relaunch` and the
+> crash handlers have not been exercised for real — the first restarts the app,
+> the second needs an actual fatal signal — and because nobody outside the
+> author's own apps uses it yet.
 
 ## Features
 
