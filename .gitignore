@@ -14,3 +14,7 @@ keys/
 # Generowane pliki serwera testowego
 TestServer/www/
 TestServer/.build/
+
+# Produkty xcodebuild uruchomionego bez -derivedDataPath
+build/
+DemoApp/build/

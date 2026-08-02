@@ -52,7 +52,12 @@ import Foundation
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         }
 
-        let installer = UpdateInstaller()
+        // Bez punktu odniesienia instalator pomija kontrolę identyfikatora i podpisu,
+        // bo host testów nie jest pakietem .app. Wskazanie zbudowanej aplikacji demo
+        // sprawia, że pełny cykl przechodzi też przez `codesign -R`.
+        let currentAppURL = ProcessInfo.processInfo.environment["ERRORUPDATE_E2E_CURRENT_APP"]
+            .map { URL(fileURLWithPath: $0) }
+        let installer = UpdateInstaller(currentAppURL: currentAppURL)
         let installedApp = try installer.install(file, into: installDir)
         #expect(installedApp.pathExtension == "app")
         #expect(FileManager.default.fileExists(
