@@ -168,6 +168,40 @@ presenter.present(report: report, supportEmail: "support@yourcompany.com")
 presenter.present(updateInfo: info, currentVersion: "1.0.0")
 ```
 
+### Making the dialogs look like your app
+
+These windows are shown to your users, so they can be themed. `.neon` (the
+default) is the framework's own dark look; `.system` follows the user's
+appearance and your app's accent colour:
+
+```swift
+let presenter = UIPresenter(theme: .system)
+```
+
+Or build your own:
+
+```swift
+var theme = ErrorUpdateTheme.system
+theme.accent = .purple
+theme.chrome = .card          // .card draws a bordered, glowing panel; .plain does not
+let presenter = UIPresenter(theme: theme)
+```
+
+Embedding the views yourself works the same way, via the environment:
+
+```swift
+UpdateAvailableView(updateInfo: info, currentVersion: "1.0.0",
+                    onInstall: {}, onLater: {}, onSkip: {})
+    .errorUpdateTheme(.system)
+```
+
+### Mandatory updates
+
+An update with `mandatory: true` hides the "Later" and "Never Ask Again"
+buttons, and its window has **no close button** — otherwise the obligation was
+cosmetic, since the user could just close the dialog. The app itself can still
+be quit, so nobody is trapped if your server is having a bad day.
+
 ## 6. Using the Delegate (Optional)
 
 Conform to `ErrorUpdateDelegate` to receive callbacks. All methods are optional

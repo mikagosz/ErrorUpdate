@@ -33,16 +33,8 @@ public struct UpdateAvailableView: View {
         self.onSkip = onSkip
     }
 
-    // MARK: - Neon Theme Colors
-
-    private struct NeonStyle {
-        static let backgroundColor = Color.black.opacity(0.9)
-        static let primaryTextColor = Color(red: 0.9, green: 0.9, blue: 0.9)
-        static let titleColor = Color(red: 0.3, green: 1.0, blue: 0.9) // Cyan
-        static let accentColor = Color(red: 0.2, green: 0.8, blue: 1.0) // Light Blue
-        static let borderColor = Color.white.opacity(0.2)
-        static let detailsBackgroundColor = Color.black.opacity(0.5)
-    }
+    /// Set with `.errorUpdateTheme(_:)`; defaults to the framework's neon look.
+    @Environment(\.errorUpdateTheme) private var theme
 
     // MARK: - Body
 
@@ -50,7 +42,7 @@ public struct UpdateAvailableView: View {
         VStack(spacing: 20) {
             header
 
-            Divider().background(NeonStyle.borderColor)
+            Divider().background(theme.border)
 
             releaseNotesSection
 
@@ -58,19 +50,13 @@ public struct UpdateAvailableView: View {
                 progressView
             }
 
-            Divider().background(NeonStyle.borderColor)
+            Divider().background(theme.border)
 
             actions
         }
         .padding(30)
-        .background(NeonStyle.backgroundColor)
         .frame(minWidth: 450, maxWidth: 600)
-        .cornerRadius(15)
-        .shadow(color: NeonStyle.accentColor.opacity(0.4), radius: 10, x: 0, y: 0)
-        .overlay(
-            RoundedRectangle(cornerRadius: 15)
-                .stroke(NeonStyle.borderColor, lineWidth: 1)
-        )
+        .modifier(ErrorUpdateChrome(theme: theme, glow: theme.accent))
     }
 
     // MARK: - Subviews
@@ -79,17 +65,17 @@ public struct UpdateAvailableView: View {
         HStack {
             Image(systemName: "arrow.down.circle.fill")
                 .font(.largeTitle)
-                .foregroundColor(NeonStyle.accentColor)
+                .foregroundColor(theme.accent)
 
             VStack(alignment: .leading) {
                 Text("Update Available")
                     .font(.title2)
                     .fontWeight(.bold)
-                    .foregroundColor(NeonStyle.titleColor)
+                    .foregroundColor(theme.title)
 
                 Text("Version \(updateInfo.latestVersion) is now available. You have \(currentVersion).")
                     .font(.callout)
-                    .foregroundColor(NeonStyle.primaryTextColor)
+                    .foregroundColor(theme.primaryText)
             }
         }
     }
@@ -97,11 +83,11 @@ public struct UpdateAvailableView: View {
     private var releaseNotesSection: some View {
         ScrollView {
             Text(updateInfo.releaseNotes)
-                .foregroundColor(NeonStyle.primaryTextColor)
+                .foregroundColor(theme.primaryText)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(NeonStyle.detailsBackgroundColor)
+        .background(theme.secondaryBackground)
         .cornerRadius(8)
         .frame(minHeight: 100, maxHeight: 200)
     }
@@ -112,7 +98,7 @@ public struct UpdateAvailableView: View {
                 .progressViewStyle(LinearProgressViewStyle())
             Text("Downloading update…")
                 .font(.caption)
-                .foregroundColor(NeonStyle.primaryTextColor)
+                .foregroundColor(theme.primaryText)
         }
     }
 

@@ -15,9 +15,9 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **0.2.x (beta)** — used in the author's own apps. Feedback and issues welcome.
+> Status: **0.3.x (beta)** — used in the author's own apps. Feedback and issues welcome.
 >
-> 0.2.0 is a security release and **changes behaviour in ways that can stop
+> 0.2.0 was a security release and **changes behaviour in ways that can stop
 > updates**: signatures became mandatory, plain HTTP is refused, and an update
 > must now match the running app's bundle identifier and signing identity. Read
 > [Requirements & Limitations](#requirements--limitations) before upgrading.
@@ -38,7 +38,7 @@ and **self-updating** to macOS apps distributed outside the App Store.
 - **Verified Downloads:** Authenticity comes from the Ed25519 signature — once a public key is configured, an update without a valid signature is refused, and a manifest that omits the signature cannot turn the check off. SHA-256 catches a corrupted transfer only, since the checksum arrives from the same manifest as the download URL.
 - **Same-App, Same-Signer Install:** Before an update replaces the running app, its `CFBundleIdentifier` must match and its code signature must satisfy the running app's designated requirement. See the limitations below for what this cannot do for ad-hoc signed apps.
 - **Safe Install & Relaunch:** The previous version is kept as a backup until the copy succeeds; the app can relaunch into the new version.
-- **SwiftUI Integration:** `ErrorUpdateManager` is an `ObservableObject` — bind `pendingReports` and `availableUpdate` directly to your views. Ready-made dialogs (`UIPresenter`) are also included.
+- **SwiftUI Integration:** `ErrorUpdateManager` is an `ObservableObject` — bind `pendingReports` and `availableUpdate` directly to your views. Ready-made dialogs (`UIPresenter`) are included and themeable, so they can look like your app rather than like this framework.
 - **Static Hosting Friendly:** The "server" is just two static files — works with GitHub Pages/Releases or any file host.
 - **Release CLI:** `errorupdate-tool` generates signing keys and release manifests.
 
@@ -51,7 +51,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "0.2.0"),
+    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "0.3.0"),
 ]
 ```
 
@@ -196,6 +196,9 @@ submit reports by mail.
 - The update installer replaces the app bundle on disk, so it does **not** work
   inside the App Sandbox (error reporting works fine in sandboxed apps).
   Apps distributed through the App Store must use App Store updates instead.
+- **A `mandatory` update cannot be dismissed.** Its window has no close button
+  and no "Later" — the app can still be quit, but the dialog will come back.
+  Do not set the flag unless you mean it.
 - **Downloads are capped at `maxDownloadBytes` (1 GB by default).** The transfer
   is cancelled as soon as it passes the limit, or immediately when the server
   announces a larger `Content-Length` — verification can only run on a file that

@@ -16,8 +16,14 @@ public final class UIPresenter {
 
     private var window: NSWindow?
     private var closeObserver: NSObjectProtocol?
+    private let theme: ErrorUpdateTheme
 
-    public init() {}
+    /// - Parameter theme: Appearance of the dialogs. Defaults to the framework's
+    ///   neon look; pass `.system` to follow the host app's appearance, or build
+    ///   your own `ErrorUpdateTheme`.
+    public init(theme: ErrorUpdateTheme = .neon) {
+        self.theme = theme
+    }
 
     // MARK: - Error Report Presentation
 
@@ -54,17 +60,25 @@ public final class UIPresenter {
             onClose: { [weak self] in self?.closeWindow() }
         )
 
-        display(view: view, title: "Update Available")
+        // A mandatory update hides "Later", so leaving the window closable made
+        // the obligation cosmetic — the user just clicked the red dot instead.
+        // The app can still be quit; only dismissing the dialog is refused.
+        display(view: view, title: "Update Available", isClosable: !updateInfo.mandatory)
     }
 
     // MARK: - Window Management
 
-    private func display<V: View>(view: V, title: String) {
-        let hostingView = NSHostingView(rootView: view)
+    private func display<V: View>(view: V, title: String, isClosable: Bool = true) {
+        let hostingView = NSHostingView(rootView: view.errorUpdateTheme(theme))
+
+        var styleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView]
+        if isClosable {
+            styleMask.insert(.closable)
+        }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: styleMask,
             backing: .buffered,
             defer: false
         )

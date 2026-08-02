@@ -25,16 +25,8 @@ public struct ReportConfirmationView: View {
         self.onDiscard = onDiscard
     }
 
-    // MARK: - Neon Theme Colors
-
-    private struct NeonStyle {
-        static let backgroundColor = Color.black.opacity(0.9)
-        static let primaryTextColor = Color(red: 0.9, green: 0.9, blue: 0.9)
-        static let titleColor = Color(red: 0.3, green: 1.0, blue: 0.9) // Cyan
-        static let accentColor = Color(red: 1.0, green: 0.2, blue: 0.8) // Magenta
-        static let borderColor = Color.white.opacity(0.2)
-        static let detailsBackgroundColor = Color.black.opacity(0.5)
-    }
+    /// Set with `.errorUpdateTheme(_:)`; defaults to the framework's neon look.
+    @Environment(\.errorUpdateTheme) private var theme
 
     // MARK: - Body
 
@@ -42,7 +34,7 @@ public struct ReportConfirmationView: View {
         VStack(spacing: 20) {
             header
 
-            Divider().background(NeonStyle.borderColor)
+            Divider().background(theme.border)
 
             content
 
@@ -50,19 +42,13 @@ public struct ReportConfirmationView: View {
                 detailsSection
             }
 
-            Divider().background(NeonStyle.borderColor)
+            Divider().background(theme.border)
 
             actions
         }
         .padding(30)
-        .background(NeonStyle.backgroundColor)
         .frame(minWidth: 450, maxWidth: 600)
-        .cornerRadius(15)
-        .shadow(color: NeonStyle.accentColor.opacity(0.4), radius: 10, x: 0, y: 0)
-        .overlay(
-            RoundedRectangle(cornerRadius: 15)
-                .stroke(NeonStyle.borderColor, lineWidth: 1)
-        )
+        .modifier(ErrorUpdateChrome(theme: theme, glow: theme.errorAccent))
     }
 
     // MARK: - Subviews
@@ -71,17 +57,17 @@ public struct ReportConfirmationView: View {
         HStack {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.largeTitle)
-                .foregroundColor(NeonStyle.accentColor)
+                .foregroundColor(theme.errorAccent)
 
             VStack(alignment: .leading) {
                 Text("Application Error Detected")
                     .font(.title2)
                     .fontWeight(.bold)
-                    .foregroundColor(NeonStyle.titleColor)
+                    .foregroundColor(theme.title)
 
                 Text("An unexpected error occurred. Sending a report helps us fix the issue.")
                     .font(.callout)
-                    .foregroundColor(NeonStyle.primaryTextColor)
+                    .foregroundColor(theme.primaryText)
             }
         }
     }
@@ -90,19 +76,19 @@ public struct ReportConfirmationView: View {
         VStack(alignment: .leading, spacing: 15) {
             Text(report.errorMessage)
                 .font(.headline)
-                .foregroundColor(NeonStyle.primaryTextColor)
+                .foregroundColor(theme.primaryText)
 
             Toggle(isOn: $includeEmail) {
                 Text("Include email for response")
             }
             .toggleStyle(CheckboxToggleStyle())
-            .foregroundColor(NeonStyle.primaryTextColor)
+            .foregroundColor(theme.primaryText)
 
             if includeEmail {
                 TextField("your.email@example.com", text: $userEmail)
                     .textFieldStyle(PlainTextFieldStyle())
                     .padding(8)
-                    .background(NeonStyle.detailsBackgroundColor)
+                    .background(theme.secondaryBackground)
                     .cornerRadius(5)
             }
         }
@@ -112,11 +98,11 @@ public struct ReportConfirmationView: View {
         ScrollView {
             Text(ReportBuilder.formatAsPlainText(report: report))
                 .font(.system(.body, design: .monospaced))
-                .foregroundColor(NeonStyle.primaryTextColor)
+                .foregroundColor(theme.primaryText)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(NeonStyle.detailsBackgroundColor)
+        .background(theme.secondaryBackground)
         .cornerRadius(8)
         .frame(maxHeight: 200)
     }
