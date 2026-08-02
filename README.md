@@ -21,10 +21,11 @@ and **self-updating** to macOS apps distributed outside the App Store.
 > updates**: signatures became mandatory, plain HTTP is refused, and an update
 > must now match the running app's bundle identifier and signing identity. Read
 > [Requirements & Limitations](#requirements--limitations) before upgrading.
-> Still beta for one honest reason: the path where a certificate-signed app
-> accepts a legitimately signed update has been reasoned through and unit-tested
-> against a system-signed reference, but not yet exercised across a real release
-> cycle.
+> Still beta because the full check → download → install → relaunch cycle has not
+> been run against a live server outside the author's machine, and the crash
+> handlers have not been exercised by a real fatal signal. The signing checks
+> themselves are covered both ways: a foreign bundle is rejected, and an update
+> signed by the same certificate is accepted (see the opt-in test below).
 
 ## Features
 
@@ -138,12 +139,21 @@ cycle can be tested without any hosting:
 
 The demo app is ad-hoc signed by default, which means the installer skips the
 signing-identity check (see the limitations below). To exercise the full
-verification path, build it with your own certificate — the identity is never
-committed:
+verification path, pass your own certificate — the identity is never committed:
 
 ```bash
-xcodebuild -project DemoApp/ErrorUpdate.xcodeproj -scheme ErrorUpdate \
-    EU_CODE_SIGN_IDENTITY=<your identity from `security find-identity -v -p codesigning`> build
+ERRORUPDATE_SIGNING_IDENTITY=<fingerprint> ./TestServer/prepare.sh
+```
+
+Find the fingerprint with `security find-identity -p codesigning` (omit `-v`:
+a self-signed root is not "valid" by that filter, yet signs perfectly well).
+
+The same variable enables an opt-in test that a bundle signed by that
+certificate is accepted as an update to another bundle signed by it — the path
+every real integrator depends on, which cannot be covered without a certificate:
+
+```bash
+ERRORUPDATE_SIGNING_IDENTITY=<fingerprint> swift test
 ```
 
 The end-to-end test runs the whole cycle (check → download → verify → install)

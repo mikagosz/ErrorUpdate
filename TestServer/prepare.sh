@@ -20,9 +20,24 @@ if [ ! -f "$ROOT/keys/errorupdate_private_key.txt" ]; then
 fi
 
 echo "==> Buduję aplikację demo..."
+# Bez ERRORUPDATE_SIGNING_IDENTITY demo podpisuje się ad-hoc, co wystarcza do
+# uruchomienia, ale instalator pominie wtedy kontrolę pochodzenia aktualizacji:
+# designated requirement podpisu ad-hoc pinuje cdhash jednego builda, więc żadna
+# nowa wersja nie może go spełnić. Aby przejść pełną ścieżkę weryfikacji, podaj
+# odcisk własnego certyfikatu:
+#   ERRORUPDATE_SIGNING_IDENTITY=$(security find-identity -p codesigning \
+#       | grep "Local Developer" | awk '{print $2}' | head -1) ./TestServer/prepare.sh
+SIGN_IDENTITY="${ERRORUPDATE_SIGNING_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    echo "    (podpis ad-hoc — kontrola pochodzenia aktualizacji będzie pominięta)"
+else
+    echo "    (podpis certyfikatem $SIGN_IDENTITY)"
+fi
+
 xcodebuild -project "$ROOT/DemoApp/ErrorUpdate.xcodeproj" -scheme ErrorUpdate \
     -destination 'platform=macOS,arch=arm64' \
-    -derivedDataPath "$ROOT/TestServer/.build" -quiet build
+    -derivedDataPath "$ROOT/TestServer/.build" -quiet \
+    EU_CODE_SIGN_IDENTITY="$SIGN_IDENTITY" build
 
 APP="$ROOT/TestServer/.build/Build/Products/Debug/ErrorUpdate.app"
 
