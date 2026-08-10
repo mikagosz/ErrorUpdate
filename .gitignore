@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Xcode / SwiftPM
+DerivedData/
+*.xcuserdata/
+xcuserdata/
+.build/
+.swiftpm/
+
+# Update signing keys — NEVER commit the private key
+keys/
+
+# Generowane pliki serwera testowego
+TestServer/www/
+TestServer/.build/
+
+# Produkty xcodebuild uruchomionego bez -derivedDataPath
+build/
+DemoApp/build/
