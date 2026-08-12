@@ -39,9 +39,14 @@ final class ServerClient: Sendable {
         }
     }
 
-    private func makeRequest(path: String, httpMethod: String) -> URLRequest {
+    private func makeRequest(
+        path: String,
+        httpMethod: String,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) -> URLRequest {
         var request = URLRequest(url: config.serverURL.appendingPathComponent(path))
         request.httpMethod = httpMethod
+        request.cachePolicy = cachePolicy
         request.setValue(config.appID, forHTTPHeaderField: "X-App-ID")
         if let apiKey = config.apiKey {
             request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
@@ -52,8 +57,21 @@ final class ServerClient: Sendable {
     }
 
     /// Fetches the latest version information from the server.
+    ///
+    /// The request **always goes to the network**: it asks about state, not about a
+    /// resource, so a cached answer is worse than no answer.
+    ///
+    /// Measured 2026-08-12: with the default policy a check answered from `URLCache`
+    /// without touching the server, so a release pulled back with `"available": false`
+    /// kept being offered — and a *forced* check (the one a user asks for) found an
+    /// update the server was not offering at all. The app's own one-hour cache is
+    /// deliberate and `force` bypasses it; this second, invisible cache was neither.
     func fetchVersionInfo() async throws -> UpdateInfo {
-        let request = makeRequest(path: "api/error-update/version-check", httpMethod: "GET")
+        let request = makeRequest(
+            path: "api/error-update/version-check",
+            httpMethod: "GET",
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
         let (data, response) = try await session.data(for: request)
         try Self.validate(response)
 

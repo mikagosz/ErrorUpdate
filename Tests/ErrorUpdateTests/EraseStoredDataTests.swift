@@ -76,15 +76,15 @@ import Foundation
     @Test func eraseAllStoredData_removesCrashFiles() throws {
         let manager = ErrorUpdateManager.shared
         let crashURL = CrashCatcher.crashReportURL()
-        let kwarantanna = crashURL.appendingPathExtension("unreadable")
+        let quarantine = crashURL.appendingPathExtension("unreadable")
 
         try Data("signal\n11\n".utf8).write(to: crashURL)
-        try Data("cokolwiek\n".utf8).write(to: kwarantanna)
+        try Data("anything\n".utf8).write(to: quarantine)
 
         manager.eraseAllStoredData()
 
         #expect(FileManager.default.fileExists(atPath: crashURL.path) == false)
-        #expect(FileManager.default.fileExists(atPath: kwarantanna.path) == false)
+        #expect(FileManager.default.fileExists(atPath: quarantine.path) == false)
     }
 
     // MARK: 5. Zmiata wszystkie klucze z prefiksem, także przyszłe

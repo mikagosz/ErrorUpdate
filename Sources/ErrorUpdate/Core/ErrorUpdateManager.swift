@@ -510,7 +510,7 @@ public final class ErrorUpdateManager: ObservableObject {
             try? FileManager.default.removeItem(at: quarantine)
             try? FileManager.default.moveItem(at: crashFileURL, to: quarantine)
             FileHandle.standardError.write(Data(
-                "ErrorUpdate: nierozpoznany plik crashu, odłożony jako \(quarantine.lastPathComponent)\n".utf8
+                "ErrorUpdate: unrecognised crash file, set aside as \(quarantine.lastPathComponent)\n".utf8
             ))
             return
         }
