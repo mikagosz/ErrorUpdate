@@ -78,7 +78,7 @@ import Foundation
         let crashURL = CrashCatcher.crashReportURL()
 
         var raw = Data("signal\n5\n0   MyApp    0x0000000104da87dc frameOne + 468\n".utf8)
-        raw.append(contentsOf: [0x8F, 0x00, 0xFD, 0x4F, 0x45, 0x92])   // dokładnie taki ogon jak w zmierzonym pliku
+        raw.append(contentsOf: [0x8F, 0x00, 0xFD, 0x4F, 0x45, 0x92])   // exactly the tail seen in the measured file
         raw.append(Data("\n2   MyApp    0x0000000104da9999 frameThree + 12\n".utf8))
         try raw.write(to: crashURL)
 
@@ -87,11 +87,11 @@ import Foundation
         manager.refreshPendingReports()   // configure() robi to samo po przetworzeniu pliku
 
         let report = manager.pendingReports.first { $0.errorMessage.contains("SIGTRAP") }
-        #expect(report != nil, "Uszkodzony ogon nie może kasować całego raportu")
+        #expect(report != nil, "A damaged tail must not wipe out the whole report")
         #expect(FileManager.default.fileExists(atPath: crashURL.path) == false,
-                "Zużyty plik crashu powinien zniknąć")
+                "A consumed crash file should be gone")
 
-        // Ramki sprzed uszkodzenia muszą ocaleć — po to jest ten raport.
+        // Frames from before the damage must survive — that is the point of the report.
         #expect(report?.stackTrace.contains { $0.contains("frameOne") } == true)
 
         if let id = report?.id { manager.discardReport(id) }
@@ -112,7 +112,7 @@ import Foundation
 
         #expect(FileManager.default.fileExists(atPath: crashURL.path) == false)
         #expect(FileManager.default.fileExists(atPath: quarantine.path),
-                "Nierozpoznany plik ma trafić do kwarantanny, nie do kosza")
+                "An unrecognised file goes to quarantine, not to the bin")
 
         try? FileManager.default.removeItem(at: quarantine)
     }

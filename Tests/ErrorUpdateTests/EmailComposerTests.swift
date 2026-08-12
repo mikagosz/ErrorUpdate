@@ -3,9 +3,9 @@ import Testing
 import Foundation
 import AppKit
 
-/// Raport z crasha nie mieści się w `mailto:` (limit ~2000 znaków), więc
-/// `EmailComposer` wysyła w treści skrót, a pełną wersję kładzie do schowka.
-/// Ta obietnica jest w treści maila napisana wprost — więc schowek musi ją spełnić.
+/// A crash report does not fit in a `mailto:` URL (a limit of roughly 2000 characters),
+/// so `EmailComposer` puts a summary in the body and the full version on the clipboard.
+/// That promise is stated in the mail body itself — so the clipboard has to keep it.
 @MainActor
 @Suite(.serialized) struct EmailComposerTests {
 
@@ -17,7 +17,7 @@ import AppKit
         )
     }
 
-    // MARK: 1. Pełny raport ląduje w schowku, nie sama zapowiedź
+    // MARK: 1. The full report reaches the clipboard, not just the promise of it
 
     @Test func copyToClipboard_putsWholeReportWithStackTrace() {
         let report = report(frames: 50)
@@ -28,11 +28,11 @@ import AppKit
         let clipboard = NSPasteboard.general.string(forType: .string) ?? ""
         #expect(clipboard.contains("--- Error Report ---"))
         #expect(clipboard.contains("someVeryLongMangledSymbolName + 49"),
-                "W schowku ma być cały stos, nie skrót")
-        #expect(clipboard.count > 2000, "Pełny raport jest z definicji dłuższy niż limit mailto")
+                "The clipboard must carry the whole stack, not the summary")
+        #expect(clipboard.count > 2000, "A full report is by definition longer than the mailto limit")
     }
 
-    // MARK: 2. Krótki raport mieści się w mailto i nie potrzebuje schowka
+    // MARK: 2. A short report fits in mailto and needs no clipboard
 
     @Test func shortReport_fitsInMailtoBody() {
         let short = report(frames: 1)
@@ -40,11 +40,11 @@ import AppKit
         #expect(body.count < 2000)
     }
 
-    // MARK: 3. Załącznik niesie cały raport
+    // MARK: 3. The attachment carries the whole report
 
-    /// `mailto:` nie ma jak przenieść pliku, więc raport szedł wyłącznie przez
-    /// schowek — w skrzynce lądowała wiadomość, która wyglądała na pustą.
-    /// Teraz pełna treść jedzie jako załącznik.
+    /// `mailto:` has no way to carry a file, so the report travelled by clipboard
+    /// alone — and what landed in the mailbox looked like an empty message. The full
+    /// content now goes as an attachment.
     @Test func attachmentFile_containsWholeReport() throws {
         let report = report(frames: 50)
 
@@ -57,6 +57,6 @@ import AppKit
         let contents = try String(contentsOf: url, encoding: .utf8)
         #expect(contents.contains("--- Error Report ---"))
         #expect(contents.contains("someVeryLongMangledSymbolName + 49"),
-                "Załącznik ma nieść cały stos, nie skrót")
+                "The attachment must carry the whole stack, not the summary")
     }
 }

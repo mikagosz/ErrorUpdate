@@ -467,26 +467,26 @@ public final class ErrorUpdateManager: ObservableObject {
             || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
-    /// Niejawnie `internal`, żeby testy mogły ją wywołać wprost: `configure()`
-    /// robi to tylko przy pierwszej konfiguracji, a w testach singleton jest już
-    /// skonfigurowany przez wcześniejsze przypadki.
+    /// Implicitly `internal` so tests can call it directly: `configure()` only does
+    /// so on the first configuration, and under a test runner the singleton has
+    /// already been configured by earlier cases.
     func processPendingCrashFile() {
         let crashFileURL = CrashCatcher.crashReportURL()
         guard FileManager.default.fileExists(atPath: crashFileURL.path) else { return }
 
         guard let data = try? Data(contentsOf: crashFileURL) else {
-            // Plik jest, ale nie daje się odczytać — zostaw go i spróbuj przy
-            // następnym starcie. Kasowanie tutaj niszczyłoby jedyny ślad po crashu.
+            // The file is there but unreadable — leave it and try again on the next
+            // launch. Deleting here would destroy the only trace of the crash.
             return
         }
 
-        // Celowo `String(decoding:as:)`, a nie `String(contentsOf:encoding:.utf8)`.
-        // `backtrace_symbols_fd` przy długich, zmanglowanych symbolach SwiftUI
-        // wypisuje do pliku bajty spoza UTF-8 — zmierzone na crashu w aplikacji
-        // SwiftUI: poprawny nagłówek, a od ~1,3 kB surowe śmieci w środku ramki.
-        // Inicjalizator z `encoding:` zwracał wtedy nil i **cały raport przepadał**,
-        // choć numer sygnału i pierwsze ramki stosu były nienaruszone. Ta wersja
-        // nie zawodzi nigdy: uszkodzone bajty stają się U+FFFD, reszta ocalała.
+        // Deliberately `String(decoding:as:)` rather than `String(contentsOf:encoding:.utf8)`.
+        // Given long, mangled SwiftUI symbols, `backtrace_symbols_fd` writes bytes that
+        // are not valid UTF-8 — measured on a crash in a SwiftUI app: a correct header,
+        // then raw garbage in the middle of a frame from roughly 1.3 kB in. The
+        // `encoding:` initialiser returned nil there and **the whole report was lost**,
+        // even though the signal number and the first stack frames were intact. This
+        // version never fails: damaged bytes become U+FFFD and the rest survives.
         let content = String(decoding: data, as: UTF8.self)
         var lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
@@ -504,8 +504,8 @@ public final class ErrorUpdateManager: ObservableObject {
                 stackTrace: lines.filter { !$0.isEmpty }
             )
         default:
-            // Nagłówka nie da się rozpoznać. Nie kasuj po cichu — odłóż plik na bok,
-            // żeby dało się go obejrzeć, ale żeby nie wracał przy każdym starcie.
+            // The header cannot be recognised. Do not delete it silently — set the
+            // file aside so it can be inspected without coming back on every launch.
             let quarantine = crashFileURL.appendingPathExtension("unreadable")
             try? FileManager.default.removeItem(at: quarantine)
             try? FileManager.default.moveItem(at: crashFileURL, to: quarantine)
@@ -515,7 +515,7 @@ public final class ErrorUpdateManager: ObservableObject {
             return
         }
 
-        // Dopiero tutaj — plik znika wyłącznie wtedy, gdy raport z niego powstał.
+        // Only here — the file goes away only once a report has been built from it.
         try? FileManager.default.removeItem(at: crashFileURL)
 
         delegate?.didCatchError(report)

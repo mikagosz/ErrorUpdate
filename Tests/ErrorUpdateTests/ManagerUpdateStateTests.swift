@@ -2,9 +2,9 @@ import Testing
 @testable import ErrorUpdate
 import Foundation
 
-// MARK: - Atrapa manifestu
+// MARK: - Manifest stub
 
-/// Serwuje jeden ustalony manifest, niezależnie od adresu.
+/// Serves one fixed manifest, whatever the URL.
 private final class StateManifestURLProtocol: URLProtocol {
 
     nonisolated(unsafe) private static var manifest = Data()
@@ -45,76 +45,76 @@ private final class StateManifestURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-// MARK: - Testy
+// MARK: - Tests
 
-/// Stan `availableUpdate` **w menedżerze**.
+/// The `availableUpdate` state **in the manager**.
 ///
-/// Luka zauważona 2026-08-10: [[Problem-automatyczne-sprawdzanie-kasuje-wykryta-aktualizacje]]
-/// naprawił bezwarunkowe `availableUpdate = info` w menedżerze, ale test regresyjny
-/// powstał piętro niżej — sprawdzał wyłącznie, że **checker** zwraca `.notChecked`.
-/// Przywrócenie dawnego przypisania w menedżerze przechodziło na zielono.
+/// Gap spotted 2026-08-10: the fix for "a periodic check wipes the update it just
+/// found" removed an unconditional `availableUpdate = info` in the manager, but the
+/// regression test landed one floor below — it only checked that the *checker* returns
+/// `.notChecked`. Restoring the old assignment in the manager still passed green.
 ///
-/// Testy chodzą po **własnej instancji** menedżera i własnych `UserDefaults`,
-/// bo singleton i klucze w `.standard` są wspólne dla wszystkich suit, a te biegną
-/// równolegle.
+/// These tests run against their **own instance** of the manager and their own
+/// `UserDefaults`, because the singleton and the keys in `.standard` are shared by every
+/// suite, and suites run in parallel.
 @MainActor
 @Suite(.serialized) struct ManagerUpdateStateTests {
 
-    private func zrobMenedzera() -> (ErrorUpdateManager, UserDefaults) {
-        let konfiguracjaSesji = URLSessionConfiguration.ephemeral
-        konfiguracjaSesji.protocolClasses = [StateManifestURLProtocol.self]
-        let sesja = URLSession(configuration: konfiguracjaSesji)
+    private func makeManager() -> (ErrorUpdateManager, UserDefaults) {
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [StateManifestURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
 
         let defaults = UserDefaults(suiteName: "ErrorUpdateManagerState-\(UUID().uuidString)")!
-        let menedzer = ErrorUpdateManager()
-        menedzer.configure(
+        let manager = ErrorUpdateManager()
+        manager.configure(
             ErrorUpdateConfig(serverURL: URL(string: "https://example.com")!,
                               allowUnsignedUpdates: true),
-            session: sesja,
+            session: session,
             userDefaults: defaults
         )
-        return (menedzer, defaults)
+        return (manager, defaults)
     }
 
-    // MARK: 1. Znaleziona aktualizacja przeżywa sprawdzenie okresowe
+    // MARK: 1. A found update survives a periodic check
 
-    /// Dokładnie sekwencja z pierwotnego zgłoszenia: użytkownik klika „sprawdź",
-    /// widzi wersję, a zaraz potem rusza sprawdzanie okresowe przy świeżym cache.
-    @Test func znalezionaAktualizacja_przezywaSprawdzenieOkresowe() async {
+    /// Exactly the sequence from the original report: the user presses "check", sees a
+    /// version, and a periodic check starts moments later against a fresh cache.
+    @Test func foundUpdate_survivesPeriodicCheck() async {
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0")
-        let (menedzer, _) = zrobMenedzera()
+        let (manager, _) = makeManager()
 
-        await menedzer.checkForUpdates(force: true)
-        #expect(menedzer.availableUpdate?.latestVersion == "2.0.0",
-                "Warunek wstępny: wymuszone sprawdzenie ma znaleźć wersję")
+        await manager.checkForUpdates(force: true)
+        #expect(manager.availableUpdate?.latestVersion == "2.0.0",
+                "Precondition: a forced check must find the version")
 
-        // Cache jest świeży po poprzednim sprawdzeniu, więc checker odpowie
-        // „nie sprawdzałem" — i to nie jest odpowiedź „nie ma aktualizacji".
-        await menedzer.checkForUpdates(force: false)
+        // The cache is fresh after the previous check, so the checker answers
+        // "did not check" — which is not an answer of "there is no update".
+        await manager.checkForUpdates(force: false)
 
-        #expect(menedzer.availableUpdate?.latestVersion == "2.0.0",
-                "Sprawdzenie okresowe nie może skasować znalezionej aktualizacji")
+        #expect(manager.availableUpdate?.latestVersion == "2.0.0",
+                "A periodic check must not wipe an update that was already found")
     }
 
-    // MARK: 2. Wycofane wydanie nadal gasi monit
+    // MARK: 2. A withdrawn release still clears the prompt
 
-    /// Druga strona tej samej naprawy: „nie sprawdzałem" zostawia stan w spokoju,
-    /// ale odpowiedź serwera „nie oferuję tej wersji" **ma** go wyczyścić.
-    /// Bez tego wersja z `if let` byłaby wystarczająca, a nie jest.
-    @Test func wycofaneWydanie_gasiMonit() async {
+    /// The other side of the same fix: "did not check" leaves the state alone, but the
+    /// server answering "I am not offering this version" **must** clear it. Without this
+    /// an `if let` would look sufficient, and it is not.
+    @Test func withdrawnRelease_clearsPrompt() async {
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0")
-        let (menedzer, defaults) = zrobMenedzera()
+        let (manager, defaults) = makeManager()
 
-        await menedzer.checkForUpdates(force: true)
-        #expect(menedzer.availableUpdate != nil, "Warunek wstępny: monit jest")
+        await manager.checkForUpdates(force: true)
+        #expect(manager.availableUpdate != nil, "Precondition: the prompt is there")
 
-        // Serwer wycofuje wydanie; cache czyścimy, żeby pytanie naprawdę poszło.
+        // The server withdraws the release; clear the cache so the question really goes out.
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0", available: false)
         defaults.removeObject(forKey: "ErrorUpdate_LastUpdateCheckDate")
 
-        await menedzer.checkForUpdates(force: false)
+        await manager.checkForUpdates(force: false)
 
-        #expect(menedzer.availableUpdate == nil,
-                "Wycofane wydanie ma zgasić monit, a nie zostać na ekranie")
+        #expect(manager.availableUpdate == nil,
+                "A withdrawn release must clear the prompt, not stay on screen")
     }
 }

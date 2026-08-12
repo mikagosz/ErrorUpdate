@@ -2,9 +2,9 @@ import Testing
 @testable import ErrorUpdate
 import Foundation
 
-// MARK: - Atrapa serwera raportów
+// MARK: - Report server stub
 
-/// Zapamiętuje wysłane raporty i odpowiada tak, jak każe `nextStatusCode`.
+/// Records the reports it was sent and answers with whatever `statusCode` says.
 private final class ReportURLProtocol: URLProtocol {
 
     nonisolated(unsafe) private static var bodies: [Data] = []
@@ -18,7 +18,7 @@ private final class ReportURLProtocol: URLProtocol {
         lock.unlock()
     }
 
-    static var wyslaneRaporty: [Data] {
+    static var sentReports: [Data] {
         lock.lock(); defer { lock.unlock() }
         return bodies
     }
@@ -29,28 +29,28 @@ private final class ReportURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        // httpBody bywa puste po przejściu przez URLSession — treść siedzi wtedy
-        // w strumieniu, i tylko stamtąd da się ją odczytać.
+        // httpBody is sometimes empty once the request has been through URLSession —
+        // the body then lives in the stream, and that is the only place to read it.
         if let body = request.httpBody {
             Self.lock.lock(); Self.bodies.append(body); Self.lock.unlock()
         } else if let stream = request.httpBodyStream {
             stream.open()
-            var dane = Data()
-            var bufor = [UInt8](repeating: 0, count: 4096)
+            var received = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
             while stream.hasBytesAvailable {
-                let ile = stream.read(&bufor, maxLength: bufor.count)
-                if ile <= 0 { break }
-                dane.append(contentsOf: bufor[0..<ile])
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                received.append(contentsOf: buffer[0..<count])
             }
             stream.close()
-            Self.lock.lock(); Self.bodies.append(dane); Self.lock.unlock()
+            Self.lock.lock(); Self.bodies.append(received); Self.lock.unlock()
         }
 
         Self.lock.lock()
-        let kod = Self.statusCode
+        let code = Self.statusCode
         Self.lock.unlock()
 
-        let response = HTTPURLResponse(url: request.url!, statusCode: kod,
+        let response = HTTPURLResponse(url: request.url!, statusCode: code,
                                        httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data())
@@ -60,83 +60,83 @@ private final class ReportURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-// MARK: - Testy
+// MARK: - Tests
 
-/// Wysyłka zaległych raportów na serwer.
+/// Submitting queued reports to the server.
 ///
-/// Do 2026-08-10 **ani jednego testu**: `TestServer` obsługiwał wyłącznie
-/// `version-check`, więc `sendPendingReports()` nie miał dokąd pójść, a cztery
-/// wszczepienia frameworka w prawdziwe aplikacje tej ścieżki nie dotknęły.
-/// Kolejka po nieudanej wysyłce była sprawdzona, udana — nie.
+/// Until 2026-08-10 this path had **no test at all**: `TestServer` only served
+/// `version-check`, so `sendPendingReports()` had nowhere to go, and four integrations
+/// of the framework into real applications never touched it. The queue after a *failed*
+/// submission was covered; after a successful one it was not.
 @MainActor
 @Suite(.serialized) struct SendReportsTests {
 
-    private func zrobMenedzera(magazyn: ReportStore) throws -> ErrorUpdateManager {
-        let konfiguracja = URLSessionConfiguration.ephemeral
-        konfiguracja.protocolClasses = [ReportURLProtocol.self]
+    private func makeManager(store: ReportStore) throws -> ErrorUpdateManager {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReportURLProtocol.self]
 
-        let menedzer = ErrorUpdateManager()
-        menedzer.configure(
+        let manager = ErrorUpdateManager()
+        manager.configure(
             ErrorUpdateConfig(serverURL: URL(string: "https://example.com")!,
                               allowUnsignedUpdates: true),
-            session: URLSession(configuration: konfiguracja),
+            session: URLSession(configuration: configuration),
             userDefaults: UserDefaults(suiteName: "ErrorUpdateSend-\(UUID().uuidString)")!
         )
-        // Własny magazyn w katalogu tymczasowym: domyślny jest wspólny dla
-        // wszystkich suit, a te biegną równolegle. Musi to być **ta sama**
-        // instancja, do której pisze test — dwa `ReportStore` na jednym katalogu
-        // mają osobne pamięci podręczne i nie widzą swoich zapisów.
-        menedzer.useReportStoreForTesting(magazyn)
-        return menedzer
+        // Our own store in a temporary directory: the default one is shared by every
+        // suite, and suites run in parallel. It must be the **same instance** the test
+        // writes to — two `ReportStore`s over one directory keep separate caches and do
+        // not see each other's writes.
+        manager.useReportStoreForTesting(store)
+        return manager
     }
 
-    private func katalogTymczasowy() -> URL {
+    private func temporaryDirectory() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("send-test-\(UUID().uuidString)", isDirectory: true)
     }
 
-    // MARK: 1. Udana wysyłka opróżnia kolejkę
+    // MARK: 1. A successful submission empties the queue
 
-    @Test func udanaWysylka_opronzniaKolejkeIDocieraNaSerwer() async throws {
+    @Test func successfulSubmission_emptiesQueueAndReachesServer() async throws {
         ReportURLProtocol.reset(statusCode: 200)
-        let katalog = katalogTymczasowy()
-        defer { try? FileManager.default.removeItem(at: katalog) }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        let magazyn = try ReportStore(directory: katalog)
-        magazyn.save(ErrorReport(errorMessage: "raport do wysłania"))
-        _ = magazyn.fetchAll()                    // domknięcie zapisu
-        let menedzer = try zrobMenedzera(magazyn: magazyn)
-        #expect(menedzer.pendingReportsCount == 1, "Warunek wstępny: jeden raport w kolejce")
+        let store = try ReportStore(directory: directory)
+        store.save(ErrorReport(errorMessage: "report to submit"))
+        _ = store.fetchAll()                      // settles the write
+        let manager = try makeManager(store: store)
+        #expect(manager.pendingReportsCount == 1, "Precondition: one report queued")
 
-        await menedzer.sendPendingReports()
+        await manager.sendPendingReports()
 
-        #expect(menedzer.pendingReportsCount == 0,
-                "Po przyjęciu przez serwer raport nie ma prawa zostać w kolejce")
+        #expect(manager.pendingReportsCount == 0,
+                "Once the server has accepted it, the report must not stay queued")
 
-        let wyslane = ReportURLProtocol.wyslaneRaporty
-        #expect(wyslane.count == 1, "Serwer ma dostać dokładnie jeden raport")
-        let tresc = String(data: wyslane.first ?? Data(), encoding: .utf8) ?? ""
-        #expect(tresc.contains("raport do wysłania"),
-                "Na serwer ma dolecieć treść raportu, nie pusty szkielet")
+        let sent = ReportURLProtocol.sentReports
+        #expect(sent.count == 1, "The server must receive exactly one report")
+        let body = String(data: sent.first ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("report to submit"),
+                "The report's content must reach the server, not an empty shell")
     }
 
-    // MARK: 2. Odmowa serwera zostawia raport w kolejce
+    // MARK: 2. A server refusal leaves the report queued
 
-    /// Ta strona była już sprawdzona pomiarem (serwer bez endpointu), ale nie
-    /// testem — a to ona decyduje, czy zgłoszenie użytkownika nie przepadnie.
-    @Test func odmowaSerwera_zostawiaRaportWKolejce() async throws {
+    /// This side had already been checked by measurement (a server with no endpoint) but
+    /// not by a test — and it is the side that decides whether a user's report is lost.
+    @Test func serverRefusal_leavesReportQueued() async throws {
         ReportURLProtocol.reset(statusCode: 500)
-        let katalog = katalogTymczasowy()
-        defer { try? FileManager.default.removeItem(at: katalog) }
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        let magazyn = try ReportStore(directory: katalog)
-        magazyn.save(ErrorReport(errorMessage: "raport, który ma przeżyć"))
-        _ = magazyn.fetchAll()
-        let menedzer = try zrobMenedzera(magazyn: magazyn)
+        let store = try ReportStore(directory: directory)
+        store.save(ErrorReport(errorMessage: "report that must survive"))
+        _ = store.fetchAll()
+        let manager = try makeManager(store: store)
 
-        await menedzer.sendPendingReports()
+        await manager.sendPendingReports()
 
-        #expect(menedzer.pendingReportsCount == 1,
-                "Raport odrzucony przez serwer zostaje do kolejnej próby")
+        #expect(manager.pendingReportsCount == 1,
+                "A report the server rejected stays for the next attempt")
     }
 }

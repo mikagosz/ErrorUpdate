@@ -69,18 +69,18 @@ public final class UIPresenter {
     // MARK: - Window Management
 
     private func display<V: View>(view: V, title: String, isClosable: Bool = true) {
-        // `NSHostingController`, a nie `NSHostingView` wstawiony jako `contentView`:
-        // widok wpięty wprost dostawał sztywną ramkę okna (480×300) i nie miał jak
-        // jej rozepchnąć. Dialog raportu rozwija sekcję szczegółów o dodatkowe
-        // ~200 pkt, więc "Show Details" nie pokazywało **nic** — treść po prostu
-        // nie mieściła się w oknie, którego na dodatek nie dało się powiększyć.
-        // Kontroler z `preferredContentSize` zgłasza rozmiar treści oknu, a okno
-        // za nim podąża.
+        // `NSHostingController` rather than an `NSHostingView` assigned as
+        // `contentView`: a view plugged in directly inherited the window's fixed frame
+        // (480×300) with no way to push it open. The report dialog expands its details
+        // section by another ~200 points, so "Show Details" revealed **nothing** — the
+        // content simply did not fit a window that could not even be resized.
+        // A controller with `preferredContentSize` reports the content size to the
+        // window, and the window follows it.
         let hostingController = NSHostingController(rootView: view.errorUpdateTheme(theme))
         hostingController.sizingOptions = [.preferredContentSize]
 
-        // `.resizable` zostaje jako wentyl bezpieczeństwa: przy nietypowych
-        // rozmiarach czcionek treść i tak da się odsłonić ręcznie.
+        // `.resizable` stays as a safety valve: with unusual font sizes the content
+        // can still be revealed by hand.
         var styleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         if isClosable {
             styleMask.insert(.closable)
@@ -95,8 +95,8 @@ public final class UIPresenter {
         window.isReleasedWhenClosed = false
         window.contentViewController = hostingController
         window.title = title
-        // Po kontrolerze okno zna już rozmiar treści — dopiero teraz centrowanie
-        // trafia w rzeczywisty rozmiar, a nie w 480×300 sprzed dopasowania.
+        // With the controller in place the window knows its content size, so only now
+        // does centring use the real size rather than the pre-fit 480×300.
         window.setContentSize(hostingController.view.fittingSize)
         window.center()
         self.window = window
