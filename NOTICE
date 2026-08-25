@@ -1,0 +1,19 @@
+ErrorUpdate — notice on artwork
+
+The MIT licence in LICENSE covers the SOURCE CODE of this project, including the
+ErrorUpdate Swift package and the demo application's code.
+
+It does NOT cover the artwork:
+
+    DemoApp/MyApp/Assets.xcassets/ikona.imageset/                        (demo app icon)
+    DemoApp/MyApp/Assets.xcassets/errorupdate/Assets/ikona.imageset/     (demo app icon)
+    DemoApp/MyApp/Assets.xcassets/logo do okna.imageset/                 (in-app logo)
+    docs/assets/errorupdate-icon.png                                     (icon used in the README)
+
+That artwork is Copyright (c) 2026 mikagosz, all rights reserved. It is included
+in this repository so the demo app builds and the README renders as shipped. It may
+not be reused, redistributed or adapted — in a fork or anywhere else — without
+written permission. If you fork this project, replace the artwork with your own.
+
+Apple's SF Symbols, where used, are drawn at runtime and are governed by Apple's
+own terms, not by this notice.

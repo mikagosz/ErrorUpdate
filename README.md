@@ -255,4 +255,9 @@ outlive the integration on your users' disks. See *Removing the Framework* in
 
 ## License
 
-[MIT](LICENSE)
+The **source code** is [MIT](LICENSE) — that covers the package and the demo app's code.
+
+The **artwork is not**: the demo app icons (`DemoApp/MyApp/Assets.xcassets/`) and
+`docs/assets/errorupdate-icon.png` are Copyright (c) 2026 mikagosz, all rights reserved,
+and are excluded from the MIT grant — see [NOTICE](NOTICE). If you fork this project,
+replace them with your own.
