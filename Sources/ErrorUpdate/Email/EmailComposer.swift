@@ -78,6 +78,13 @@ public enum EmailComposer {
         return NSWorkspace.shared.open(url)
     }
 
+    static let attachmentPrefix = "ErrorReport-"
+
+    /// Whether a file name in `$TMPDIR` is one of the attachments written above.
+    static func isReportAttachment(_ name: String) -> Bool {
+        name.hasPrefix(attachmentPrefix) && name.hasSuffix(".txt")
+    }
+
     /// Writes the report as a plain-text file for attaching. The name carries the
     /// app version and a timestamp, so several reports from one user stay apart
     /// in a mailbox.
@@ -86,7 +93,7 @@ public enum EmailComposer {
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         formatter.locale = Locale(identifier: "en_US_POSIX")
 
-        let name = "ErrorReport-\(report.appVersion)-\(formatter.string(from: report.timestamp)).txt"
+        let name = "\(attachmentPrefix)\(report.appVersion)-\(formatter.string(from: report.timestamp)).txt"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
 
         do {

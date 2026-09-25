@@ -168,8 +168,26 @@ public final class ErrorUpdateManager: ObservableObject {
         storeAndMaybeSend(report)
     }
 
+    /// A send in progress. Two errors in quick succession each started their own
+    /// pass over the same snapshot of pending reports, and both submitted every
+    /// report before either marked it as sent — the server got duplicates.
+    private var sendingReports: Task<Void, Never>?
+
     /// Sends all pending reports to the server, removing the ones that were accepted.
+    /// A call made while a send is running waits for it and then sends whatever
+    /// is still pending, so no report is submitted twice.
     public func sendPendingReports() async {
+        while let running = sendingReports {
+            await running.value
+            if sendingReports == running { sendingReports = nil }
+        }
+        let pass = Task { await sendPendingReportsOnce() }
+        sendingReports = pass
+        await pass.value
+        if sendingReports == pass { sendingReports = nil }
+    }
+
+    private func sendPendingReportsOnce() async {
         guard let serverClient, let reportStore else { return }
 
         for report in reportStore.fetchAll() {
@@ -194,8 +212,9 @@ public final class ErrorUpdateManager: ObservableObject {
     }
 
     /// Erases everything this framework has written outside your app: stored
-    /// reports, the raw crash file, its quarantined sibling, cached downloads and
-    /// every `ErrorUpdate_*` key in `UserDefaults`.
+    /// reports, the raw crash file, its quarantined sibling, this app's cached
+    /// downloads, report files written for e-mail attachments and every
+    /// `ErrorUpdate_*` key in `UserDefaults`.
     ///
     /// Call this when you remove the framework from an app, or to give users a
     /// "delete my diagnostic data" button. Reports contain stack traces with
@@ -237,10 +256,20 @@ public final class ErrorUpdateManager: ObservableObject {
             do { try fileManager.removeItem(at: url) } catch { allGone = false }
         }
 
-        // Half-finished downloads live in a temporary directory of our own.
-        let downloads = fileManager.temporaryDirectory.appendingPathComponent("ErrorUpdate_download")
+        // Half-finished downloads live in this app's own folder of the shared
+        // download directory — never the whole directory, which other apps
+        // using the framework share through the same $TMPDIR.
+        let downloads = UpdateDownloader.downloadRoot
         if fileManager.fileExists(atPath: downloads.path) {
             do { try fileManager.removeItem(at: downloads) } catch { allGone = false }
+        }
+
+        // Plain-text copies written for e-mail attachments carry the full report,
+        // `/Users/<name>/` paths included. They are named after this app's reports.
+        let temporary = fileManager.temporaryDirectory
+        let attachments = (try? fileManager.contentsOfDirectory(atPath: temporary.path)) ?? []
+        for name in attachments where EmailComposer.isReportAttachment(name) {
+            do { try fileManager.removeItem(at: temporary.appendingPathComponent(name)) } catch { allGone = false }
         }
 
         // Every key this framework writes is prefixed, so sweeping the prefix
@@ -344,12 +373,13 @@ public final class ErrorUpdateManager: ObservableObject {
         // Written before the swap, not after: from here on the process can be
         // replaced at any moment, and the next launch is the only place where
         // "did this install actually change the version" can be answered.
-        if let expected = availableUpdate?.latestVersion {
+        let expected = availableUpdate?.latestVersion
+        if let expected {
             installedVersions.expect(expected)
         }
         do {
             let installedAppURL = try await Task.detached(priority: .userInitiated) {
-                try installer.install(fileURL)
+                try installer.install(fileURL, expectedVersion: expected)
             }.value
             downloadedUpdateURL = nil
             // The archive has done its job. It has to go before the relaunch —
@@ -369,14 +399,14 @@ public final class ErrorUpdateManager: ObservableObject {
     }
 
     /// Removes the per-download directory the downloader created for `fileURL`,
-    /// and the shared parent once it is empty.
+    /// then this app's download folder and the shared parent once each is empty.
     ///
-    /// Deliberately narrow: only a directory that sits directly inside our own
-    /// `ErrorUpdate_download` is removed, so a caller passing some other path
+    /// Deliberately narrow: only a directory that sits directly inside this
+    /// app's own download folder is removed, so a caller passing some other path
     /// cannot turn this into a delete of an unrelated folder.
     nonisolated static func removeDownloadArtifacts(of fileURL: URL) {
         let fileManager = FileManager.default
-        let root = fileManager.temporaryDirectory.appendingPathComponent("ErrorUpdate_download")
+        let root = UpdateDownloader.downloadRoot
         let directory = fileURL.deletingLastPathComponent()
 
         guard directory.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL else {
@@ -384,10 +414,12 @@ public final class ErrorUpdateManager: ObservableObject {
         }
         try? fileManager.removeItem(at: directory)
 
-        // The shared parent is worth removing too, but only when nothing else
-        // is downloading into it right now.
-        if let leftovers = try? fileManager.contentsOfDirectory(atPath: root.path), leftovers.isEmpty {
-            try? fileManager.removeItem(at: root)
+        // The parents are worth removing too, but only when nothing else is
+        // downloading into them right now.
+        for folder in [root, root.deletingLastPathComponent()] {
+            guard let leftovers = try? fileManager.contentsOfDirectory(atPath: folder.path),
+                  leftovers.isEmpty else { return }
+            try? fileManager.removeItem(at: folder)
         }
     }
 

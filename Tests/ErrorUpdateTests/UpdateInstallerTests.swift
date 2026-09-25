@@ -15,7 +15,8 @@ import Foundation
         named name: String,
         bundleID: String,
         in directory: URL,
-        signingIdentity: String = "-"
+        signingIdentity: String = "-",
+        version: String = "1.0"
     ) throws -> URL {
         let appURL = directory.appendingPathComponent("\(name).app")
         let macOSDir = appURL.appendingPathComponent("Contents/MacOS")
@@ -26,7 +27,7 @@ import Foundation
             "CFBundleName": name,
             "CFBundleExecutable": name,
             "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": "1.0",
+            "CFBundleShortVersionString": version,
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: appURL.appendingPathComponent("Contents/Info.plist"))
@@ -108,6 +109,61 @@ import Foundation
         // Nothing was left next to the running app.
         let installed = try FileManager.default.contentsOfDirectory(atPath: installDir.path)
         #expect(installed.isEmpty, "Nothing should have been installed, found \(installed)")
+    }
+
+    // MARK: 1a. The manifest's version must be the bundle's own, and newer
+    //
+    // The Ed25519 signature covers the file, not the version beside it in the
+    // manifest, so an older, genuinely signed release could be served as "2.0".
+
+    private func installAttempt(current: String, packaged: String, expected: String) throws
+        -> (result: Result<URL, Error>, installDir: URL, workDir: URL) {
+        let workDir = try temporaryDirectory()
+        let currentApp = try makeApp(named: "Current", bundleID: "com.example.current",
+                                     in: workDir, version: current)
+        let newDir = workDir.appendingPathComponent("new")
+        try FileManager.default.createDirectory(at: newDir, withIntermediateDirectories: true)
+        let newApp = try makeApp(named: "Current", bundleID: "com.example.current",
+                                 in: newDir, version: packaged)
+        let zipURL = workDir.appendingPathComponent("update.zip")
+        try zip(newApp, to: zipURL)
+        let installDir = workDir.appendingPathComponent("install")
+        try FileManager.default.createDirectory(at: installDir, withIntermediateDirectories: true)
+        let installer = UpdateInstaller(currentAppURL: currentApp)
+        let result = Result { try installer.install(zipURL, into: installDir, expectedVersion: expected) }
+        return (result, installDir, workDir)
+    }
+
+    @Test func install_olderReleaseServedAsNewer_rejected() throws {
+        let attempt = try installAttempt(current: "1.0", packaged: "0.9", expected: "2.0")
+        defer { try? FileManager.default.removeItem(at: attempt.workDir) }
+        guard case .failure(let error) = attempt.result,
+              case .versionMismatch(let expected, let found)? = error as? UpdateInstaller.InstallerError else {
+            Issue.record("Expected .versionMismatch, got \(attempt.result)")
+            return
+        }
+        #expect(expected == "2.0")
+        #expect(found == "0.9")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: attempt.installDir.path).isEmpty)
+    }
+
+    @Test func install_olderReleaseWithHonestManifest_rejected() throws {
+        let attempt = try installAttempt(current: "1.0", packaged: "0.9", expected: "0.9")
+        defer { try? FileManager.default.removeItem(at: attempt.workDir) }
+        guard case .failure(let error) = attempt.result,
+              case .notNewer(let found, let current)? = error as? UpdateInstaller.InstallerError else {
+            Issue.record("Expected .notNewer, got \(attempt.result)")
+            return
+        }
+        #expect(found == "0.9")
+        #expect(current == "1.0")
+    }
+
+    @Test func install_newerReleaseMatchingManifest_succeeds() throws {
+        let attempt = try installAttempt(current: "1.0", packaged: "2.0", expected: "2.0")
+        defer { try? FileManager.default.removeItem(at: attempt.workDir) }
+        let installed = try attempt.result.get()
+        #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("Contents/Info.plist").path))
     }
 
     // MARK: 2. Ta sama aplikacja, oba podpisy ad-hoc → instalacja przechodzi

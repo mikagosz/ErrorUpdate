@@ -60,12 +60,14 @@ private final class StateManifestURLProtocol: URLProtocol {
 @MainActor
 @Suite(.serialized) struct ManagerUpdateStateTests {
 
+    private let janitor = DefaultsJanitor()
+
     private func makeManager() -> (ErrorUpdateManager, UserDefaults) {
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [StateManifestURLProtocol.self]
         let session = URLSession(configuration: sessionConfiguration)
 
-        let defaults = UserDefaults(suiteName: "ErrorUpdateManagerState-\(UUID().uuidString)")!
+        let defaults = janitor.make("ErrorUpdateManagerState")
         let manager = ErrorUpdateManager()
         manager.configure(
             ErrorUpdateConfig(serverURL: URL(string: "https://example.com")!,

@@ -121,11 +121,12 @@ public struct UpdateAvailableView: View {
                 Spacer()
             }
 
+            // Deliberately no `.defaultAction`: installing downloads, swaps the
+            // app and restarts it — a Return pressed out of habit must not do that.
             Button("Install Now") {
                 onInstall()
             }
             .disabled(isDownloading)
-            .keyboardShortcut(.defaultAction)
         }
     }
 }

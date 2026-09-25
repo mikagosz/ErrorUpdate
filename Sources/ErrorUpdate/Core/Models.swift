@@ -108,6 +108,15 @@ public struct UpdateInfo: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         latestVersion = try container.decode(String.self, forKey: .latestVersion)
         downloadURL = try container.decode(URL.self, forKey: .downloadURL)
+        // Checked here, not only in the downloader: a host that opens the address
+        // itself (a "Download" button handing it to NSWorkspace) never passes
+        // through the downloader, and a manifest could point it at `file://`,
+        // `smb://` or another app's URL scheme.
+        guard URLSecurity.isAcceptable(downloadURL) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .downloadURL, in: container,
+                debugDescription: "downloadURL must use https (or http to loopback): \(downloadURL)")
+        }
         sha256 = try container.decode(String.self, forKey: .sha256)
         available = try container.decodeIfPresent(Bool.self, forKey: .available) ?? true
         releaseNotes = try container.decodeIfPresent(String.self, forKey: .releaseNotes) ?? ""

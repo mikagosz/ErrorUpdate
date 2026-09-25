@@ -51,9 +51,10 @@ private final class ManifestURLProtocol: URLProtocol {
 
     /// Fresh defaults per test, so neither the 1-hour cache nor a skipped
     /// version leaks between cases.
+    private let janitor = DefaultsJanitor()
+
     private func makeDefaults() -> UserDefaults {
-        let suiteName = "ErrorUpdateTests-\(UUID().uuidString)"
-        return UserDefaults(suiteName: suiteName)!
+        janitor.make("ErrorUpdateTests")
     }
 
     private func makeChecker(

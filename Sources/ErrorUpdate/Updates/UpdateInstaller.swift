@@ -19,6 +19,8 @@ public final class UpdateInstaller: Sendable {
         case codeSignVerificationFailed(String)
         case signingIdentityMismatch(String)
         case bundleIdentifierMismatch(expected: String, found: String)
+        case versionMismatch(expected: String, found: String)
+        case notNewer(found: String, current: String)
         case installationFailed(Error)
 
         public var errorDescription: String? {
@@ -35,6 +37,10 @@ public final class UpdateInstaller: Sendable {
                 return "The update is not signed by the same identity as the running app: \(output)"
             case .bundleIdentifierMismatch(let expected, let found):
                 return "The update contains a different application: expected bundle identifier \(expected), found \(found)."
+            case .versionMismatch(let expected, let found):
+                return "The update contains version \(found), but the manifest promised \(expected)."
+            case .notNewer(let found, let current):
+                return "The update contains version \(found), which is not newer than the installed \(current)."
             case .installationFailed(let error):
                 return "Installation failed: \(error.localizedDescription)"
             }
@@ -60,14 +66,23 @@ public final class UpdateInstaller: Sendable {
     /// Blocking — call it from a background thread or task.
     /// - Parameter installDirectory: Where to place the new app bundle.
     ///   Defaults to the directory of the currently running app (or /Applications).
+    /// - Parameter expectedVersion: The `latestVersion` the manifest announced.
+    ///   When given, the bundle's own `CFBundleShortVersionString` must equal it
+    ///   and be newer than the running app's. The Ed25519 signature covers the
+    ///   file only, not the version number next to it in the manifest — without
+    ///   this check, whoever controls the manifest could "update" the app to an
+    ///   older, genuinely signed release taken from the public archive.
     /// - Returns: URL of the installed app bundle.
     @discardableResult
-    public func install(_ fileURL: URL, into installDirectory: URL? = nil) throws -> URL {
+    public func install(_ fileURL: URL, into installDirectory: URL? = nil,
+                        expectedVersion: String? = nil) throws -> URL {
         switch fileURL.pathExtension.lowercased() {
         case "dmg":
-            return try installDmg(at: fileURL, installDirectory: installDirectory)
+            return try installDmg(at: fileURL, installDirectory: installDirectory,
+                                  expectedVersion: expectedVersion)
         case "zip":
-            return try installZip(at: fileURL, installDirectory: installDirectory)
+            return try installZip(at: fileURL, installDirectory: installDirectory,
+                                  expectedVersion: expectedVersion)
         default:
             throw InstallerError.unsupportedFileFormat
         }
@@ -85,7 +100,7 @@ public final class UpdateInstaller: Sendable {
 
     // MARK: - DMG Installation
 
-    private func installDmg(at dmgURL: URL, installDirectory: URL?) throws -> URL {
+    private func installDmg(at dmgURL: URL, installDirectory: URL?, expectedVersion: String?) throws -> URL {
         // Unique mount point so parallel installs (or leftovers) never collide.
         let mountPoint = FileManager.default.temporaryDirectory
             .appendingPathComponent("ErrorUpdate_mount_\(UUID().uuidString)").path
@@ -108,12 +123,13 @@ public final class UpdateInstaller: Sendable {
             throw InstallerError.couldNotFindAppBundle
         }
 
-        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory)
+        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory,
+                                       expectedVersion: expectedVersion)
     }
 
     // MARK: - ZIP Installation
 
-    private func installZip(at zipURL: URL, installDirectory: URL?) throws -> URL {
+    private func installZip(at zipURL: URL, installDirectory: URL?, expectedVersion: String?) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -124,15 +140,20 @@ public final class UpdateInstaller: Sendable {
             throw InstallerError.couldNotFindAppBundle
         }
 
-        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory)
+        return try replaceInstalledApp(with: appURL, installDirectory: installDirectory,
+                                       expectedVersion: expectedVersion)
     }
 
     // MARK: - Replacement
 
     /// Verifies the new bundle's code signature, then swaps it in with a backup
     /// so a failed copy never leaves the user without an app.
-    private func replaceInstalledApp(with newAppURL: URL, installDirectory: URL?) throws -> URL {
+    private func replaceInstalledApp(with newAppURL: URL, installDirectory: URL?,
+                                     expectedVersion: String?) throws -> URL {
         try verifyCodeSignature(newAppURL)
+        if let expectedVersion {
+            try verifyVersion(of: newAppURL, expected: expectedVersion)
+        }
 
         let fileManager = FileManager.default
 
@@ -243,6 +264,20 @@ public final class UpdateInstaller: Sendable {
         try verifySigningIdentity(of: appURL, matching: currentAppURL)
     }
 
+    /// Rejects a bundle whose own version is not the one the manifest announced,
+    /// or is not newer than the running app — a downgrade dressed as an update.
+    private func verifyVersion(of appURL: URL, expected: String) throws {
+        let found = Self.infoValue("CFBundleShortVersionString", ofAppAt: appURL) ?? "(none)"
+        guard found == expected else {
+            throw InstallerError.versionMismatch(expected: expected, found: found)
+        }
+        let current = currentAppURL.flatMap { Self.infoValue("CFBundleShortVersionString", ofAppAt: $0) }
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if let current, !UpdateChecker.isVersion(found, greaterThan: current) {
+            throw InstallerError.notNewer(found: found, current: current)
+        }
+    }
+
     /// Rejects an update that carries a different application than the one running.
     private func verifyBundleIdentifier(of appURL: URL, matching currentAppURL: URL) throws {
         guard let expected = Self.bundleIdentifier(ofAppAt: currentAppURL) else {
@@ -311,13 +346,17 @@ public final class UpdateInstaller: Sendable {
     }
 
     private static func bundleIdentifier(ofAppAt appURL: URL) -> String? {
+        infoValue("CFBundleIdentifier", ofAppAt: appURL)
+    }
+
+    private static func infoValue(_ key: String, ofAppAt appURL: URL) -> String? {
         let plistURL = appURL.appendingPathComponent("Contents/Info.plist")
         guard let data = try? Data(contentsOf: plistURL),
               let plist = try? PropertyListSerialization.propertyList(
                 from: data, options: [], format: nil) as? [String: Any] else {
             return nil
         }
-        return plist["CFBundleIdentifier"] as? String
+        return plist[key] as? String
     }
 
     private static func warn(_ message: String) {

@@ -15,7 +15,7 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.0** — used in the author's own apps across five integrations. The
+> Status: **1.0.1** — used in the author's own apps across five integrations. The
 > public API is considered stable: from here on, anything that breaks a compiling
 > integration means a major version. Feedback and issues welcome.
 >
@@ -225,6 +225,11 @@ outlive the integration on your users' disks. See *Removing the Framework* in
 - **Signatures are mandatory once `publicKey` is set.** An update whose manifest
   has no `signature`, or whose signature does not verify, is rejected — the
   server cannot switch verification off by omitting the field.
+- **The signature covers the file, not the version number.** So the installer
+  also reads `CFBundleShortVersionString` from the downloaded bundle and refuses
+  it unless it equals the manifest's `latestVersion` and is newer than the
+  running app. Without that, whoever controls the manifest could serve an older,
+  genuinely signed release from your public archive as an "update".
 - **Running without a public key requires `allowUnsignedUpdates: true`.**
   In that mode an update is only checked against a checksum the same server
   supplies, which protects against a corrupted transfer and nothing else.
@@ -237,8 +242,9 @@ outlive the integration on your users' disks. See *Removing the Framework* in
   Ed25519 signature. A self-signed certificate is enough to get a stable
   requirement; no paid account is needed.
 - **An update that installs but changes nothing is reported, not repeated.**
-  If the app relaunches still on the old version — the usual cause is a build
-  packaged without bumping `CFBundleShortVersionString` — the framework says so
+  A build packaged without bumping `CFBundleShortVersionString` is now refused
+  before the swap (see above). If the app still relaunches on the old version,
+  the framework says so
   through `ineffectiveUpdate`, the `updateDidNotTakeEffect(_:)` delegate call and
   stderr, and stops offering that exact version on automatic checks. A manual
   check still shows it, so a corrected release under the same number can be

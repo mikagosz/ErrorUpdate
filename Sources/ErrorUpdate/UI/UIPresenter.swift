@@ -108,8 +108,11 @@ public final class UIPresenter {
             Task { @MainActor in Self.isPresenting = false }
         }
 
+        // No `ignoringOtherApps`: the check runs on a timer, so the window can
+        // appear while someone is typing in another app — and a Return meant for
+        // that app would land on "Install Now". The window waits in front of this
+        // app's windows; macOS brings it forward when the user switches here.
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func closeWindow() {

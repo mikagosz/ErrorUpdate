@@ -71,6 +71,8 @@ private final class ReportURLProtocol: URLProtocol {
 @MainActor
 @Suite(.serialized) struct SendReportsTests {
 
+    private let janitor = DefaultsJanitor()
+
     private func makeManager(store: ReportStore) throws -> ErrorUpdateManager {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReportURLProtocol.self]
@@ -80,7 +82,7 @@ private final class ReportURLProtocol: URLProtocol {
             ErrorUpdateConfig(serverURL: URL(string: "https://example.com")!,
                               allowUnsignedUpdates: true),
             session: URLSession(configuration: configuration),
-            userDefaults: UserDefaults(suiteName: "ErrorUpdateSend-\(UUID().uuidString)")!
+            userDefaults: janitor.make("ErrorUpdateSend")
         )
         // Our own store in a temporary directory: the default one is shared by every
         // suite, and suites run in parallel. It must be the **same instance** the test
@@ -118,6 +120,29 @@ private final class ReportURLProtocol: URLProtocol {
         let body = String(data: sent.first ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("report to submit"),
                 "The report's content must reach the server, not an empty shell")
+    }
+
+    // MARK: 1a. Two sends at once submit each report once
+
+    /// Two errors in quick succession each started `sendPendingReports()` over the
+    /// same snapshot; both submitted before either marked the report as sent.
+    @Test func concurrentSends_submitEachReportOnce() async throws {
+        ReportURLProtocol.reset(statusCode: 200)
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try ReportStore(directory: directory)
+        store.save(ErrorReport(errorMessage: "sent exactly once"))
+        _ = store.fetchAll()
+        let manager = try makeManager(store: store)
+
+        async let first: Void = manager.sendPendingReports()
+        async let second: Void = manager.sendPendingReports()
+        _ = await (first, second)
+
+        #expect(ReportURLProtocol.sentReports.count == 1,
+                "The server got \(ReportURLProtocol.sentReports.count) copies of one report")
+        #expect(manager.pendingReportsCount == 0)
     }
 
     // MARK: 2. A server refusal leaves the report queued

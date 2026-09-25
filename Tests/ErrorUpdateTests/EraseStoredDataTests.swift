@@ -110,6 +110,41 @@ import Foundation
         defaults.removeObject(forKey: "SomeoneElsesSetting_NotOurs")
     }
 
+    // MARK: 5a. E-mail attachments go, other apps' downloads stay
+
+    /// Measured 2026-09-24: the erase skipped the plain-text copies written for
+    /// e-mail (whole report, `/Users/<name>/` paths) and removed the shared
+    /// download directory, taking a verified update from any other app on the Mac.
+    @Test func eraseAllStoredData_removesAttachmentsKeepsOtherAppsDownloads() throws {
+        let manager = ErrorUpdateManager.shared
+        let fileManager = FileManager.default
+        let attachment = try #require(EmailComposer.writeReportToTemporaryFile(
+            report: ErrorReport(errorMessage: "attachment to erase")))
+        let unrelated = fileManager.temporaryDirectory
+            .appendingPathComponent("ErrorReportNotes-\(UUID().uuidString).txt")
+        try Data("not ours".utf8).write(to: unrelated)
+        defer { try? fileManager.removeItem(at: unrelated) }
+
+        let ours = UpdateDownloader.downloadRoot.appendingPathComponent(UUID().uuidString)
+        let otherApp = UpdateDownloader.downloadRoot.deletingLastPathComponent()
+            .appendingPathComponent("com.example.other-\(UUID().uuidString)")
+        for directory in [ours, otherApp] {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("package".utf8).write(to: directory.appendingPathComponent("update.zip"))
+        }
+        defer { try? fileManager.removeItem(at: otherApp) }
+
+        manager.eraseAllStoredData()
+
+        #expect(fileManager.fileExists(atPath: attachment.path) == false,
+                "The e-mail copy carries the whole report and has to go")
+        #expect(fileManager.fileExists(atPath: unrelated.path),
+                "A file that only starts similarly is not ours")
+        #expect(fileManager.fileExists(atPath: ours.path) == false)
+        #expect(fileManager.fileExists(atPath: otherApp.appendingPathComponent("update.zip").path),
+                "Another app's verified download is not this app's data")
+    }
+
     // MARK: 6. Erasing stops the schedule
 
     /// Measured live in a host app on 2026-08-10: after pressing "Delete diagnostic

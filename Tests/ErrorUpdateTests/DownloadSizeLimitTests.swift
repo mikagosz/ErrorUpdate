@@ -199,6 +199,7 @@ private final class SlowHTTPServer: @unchecked Sendable {
             signature: "", mandatory: false)
 
         let url = try await downloader.download(info)
+        defer { ErrorUpdateManager.removeDownloadArtifacts(of: url) }
         #expect(try Data(contentsOf: url).count == payloadSize)
     }
 }

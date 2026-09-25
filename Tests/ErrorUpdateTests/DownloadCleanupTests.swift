@@ -10,9 +10,8 @@ import Foundation
 /// only clears `$TMPDIR` on restart, so every further update piled on another package.
 @Suite(.serialized) struct DownloadCleanupTests {
 
-    private var root: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("ErrorUpdate_download")
-    }
+    /// This app's own folder inside the shared `ErrorUpdate_download`.
+    private var root: URL { UpdateDownloader.downloadRoot }
 
     /// Reproduces what the downloader does: one directory per download, file inside.
     private func makeDownload(named name: String = "MyApp-1.1.1.zip") throws -> URL {

@@ -90,6 +90,7 @@ private func sha256hex(_ data: Data) -> String {
 
         let downloader = UpdateDownloader(config: config, session: session)
         let url = try await downloader.download(info)
+        defer { ErrorUpdateManager.removeDownloadArtifacts(of: url) }
         #expect(url.path.contains("update.zip"))
         let downloaded = try Data(contentsOf: url)
         #expect(downloaded == payload)
@@ -158,6 +159,7 @@ private func sha256hex(_ data: Data) -> String {
 
         let downloader = UpdateDownloader(config: config, session: session)
         let url = try await downloader.download(info)
+        defer { ErrorUpdateManager.removeDownloadArtifacts(of: url) }
         #expect(url.path.contains("update.zip"))
     }
 
@@ -266,6 +268,7 @@ private func sha256hex(_ data: Data) -> String {
 
         let downloader = UpdateDownloader(config: config, session: session)
         let url = try await downloader.download(info)
+        defer { ErrorUpdateManager.removeDownloadArtifacts(of: url) }
         #expect(try Data(contentsOf: url) == payload)
     }
 
@@ -333,6 +336,7 @@ private func sha256hex(_ data: Data) -> String {
 
         let downloader = UpdateDownloader(config: config, session: session)
         let url = try await downloader.download(info)
+        defer { ErrorUpdateManager.removeDownloadArtifacts(of: url) }
         #expect(try Data(contentsOf: url).count == 1024)
     }
 

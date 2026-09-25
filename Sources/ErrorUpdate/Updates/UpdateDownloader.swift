@@ -47,6 +47,23 @@ public final class UpdateDownloader: Sendable {
     private let maxRetries = 3
     private let baseDelay: TimeInterval = 2
 
+    /// Longest a whole download may take. `URLSession.shared` allows seven days
+    /// and only times out after 60 s of silence, so a server trickling one byte
+    /// a minute kept a download open for weeks. An hour carries the 1 GB size
+    /// limit even over a slow link; a session configured stricter keeps its own.
+    static let maxResourceTimeout: TimeInterval = 3600
+
+    /// Where this app's downloads go: one directory per host app inside the
+    /// shared `ErrorUpdate_download`. `$TMPDIR` is one per user, so without the
+    /// app's own folder "delete my data" in one app took away another app's
+    /// verified update.
+    nonisolated static var downloadRoot: URL {
+        let host = Bundle.main.bundleIdentifier ?? "unidentified-host"
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("ErrorUpdate_download")
+            .appendingPathComponent(host)
+    }
+
     public init(config: ErrorUpdateConfig, session: URLSession = .shared) {
         self.config = config
         self.session = session
@@ -88,9 +105,7 @@ public final class UpdateDownloader: Sendable {
         }
 
         // A unique directory per download avoids collisions between attempts.
-        let downloadDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ErrorUpdate_download")
-            .appendingPathComponent(UUID().uuidString)
+        let downloadDir = Self.downloadRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
 
         let fileName = info.downloadURL.lastPathComponent.isEmpty ? "update" : info.downloadURL.lastPathComponent
@@ -98,11 +113,14 @@ public final class UpdateDownloader: Sendable {
 
         // Nothing can be verified until the file is on disk, so the size has to
         // be bounded while the file is still arriving.
+        let configuration = session.configuration
+        configuration.timeoutIntervalForResource = min(configuration.timeoutIntervalForResource,
+                                                       Self.maxResourceTimeout)
         let response: URLResponse
         do {
             response = try await SizeLimitedDownload(limit: config.maxDownloadBytes,
                                                      destinationURL: destinationURL)
-                .run(url: info.downloadURL, configuration: session.configuration)
+                .run(url: info.downloadURL, configuration: configuration)
         } catch {
             try? FileManager.default.removeItem(at: downloadDir)
             throw error
