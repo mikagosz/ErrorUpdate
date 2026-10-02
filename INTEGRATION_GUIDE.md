@@ -144,6 +144,29 @@ that actually reached the server can clear it. Starting the schedule right after
 a manual check is therefore safe — the update the user is looking at stays on
 screen.
 
+### After an update: the first launch of a new version
+
+Since 1.0.6 the first launch of a newer version than the previous launch ran
+publishes `ErrorUpdateManager.shared.completedUpdate` (a `CompletedUpdate` with
+`previousVersion`, `currentVersion` and `installedInApp`) and calls the
+delegate's `updateDidComplete(_:)`. It fires once, whatever brought the new
+version in — this library's install, an installer package or a manual copy —
+so it is the place for anything that has to follow the app to a new version:
+re-registering a privileged helper, migrating data, showing "what's new".
+
+```swift
+if let update = ErrorUpdateManager.shared.completedUpdate {
+    // e.g. a helper registered by the old bundle stays bound to it
+    reRegisterHelper(after: update.previousVersion)
+}
+```
+
+The very first launch is not an update, and neither is the first launch after
+adopting 1.0.6 — there is no earlier version on record yet. A downgrade is
+recorded but not reported. Like the ineffective-install check below, it happens
+inside `configure(_:)`, usually before the delegate is set; the published
+property keeps it for the whole run.
+
 ### When an update installs but nothing changes
 
 If the app relaunches still reporting the old version, the install produced

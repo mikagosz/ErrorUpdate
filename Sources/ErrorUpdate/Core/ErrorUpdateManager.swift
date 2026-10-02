@@ -36,6 +36,9 @@ public final class ErrorUpdateManager: ObservableObject {
     /// see ``IneffectiveUpdate``. Survives relaunches until a version that
     /// actually takes effect is installed.
     @Published public private(set) var ineffectiveUpdate: IneffectiveUpdate?
+    /// Set on the first launch of a newer version than the previous launch ran,
+    /// for the rest of that run. See ``CompletedUpdate``.
+    @Published public private(set) var completedUpdate: CompletedUpdate?
 
     public var pendingReportsCount: Int { pendingReports.count }
 
@@ -44,8 +47,11 @@ public final class ErrorUpdateManager: ObservableObject {
 
     /// The app's marketing version, read from the bundle.
     public var currentVersion: String? {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        bundleVersionOverride ?? Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
+
+    /// Tests only: the test host has no app version of its own.
+    var bundleVersionOverride: String?
 
     // MARK: - Private
 
@@ -149,7 +155,11 @@ public final class ErrorUpdateManager: ObservableObject {
         // previous run's install.
         if !isReconfiguration {
             processPendingCrashFile()
+            // Read before the verification clears it: an install of exactly
+            // this version means the new version came from this library.
+            let expectedByInstall = installedVersions.expectedVersion
             verifyPreviousInstall()
+            recordLaunch(expectedByInstall: expectedByInstall, defaults: userDefaults)
         }
         refreshPendingReports()
     }
@@ -289,6 +299,7 @@ public final class ErrorUpdateManager: ObservableObject {
         availableUpdate = nil
         downloadedUpdateURL = nil
         ineffectiveUpdate = nil
+        completedUpdate = nil
 
         return allGone
     }
@@ -490,6 +501,19 @@ public final class ErrorUpdateManager: ObservableObject {
                   leftovers.isEmpty else { return }
             try? fileManager.removeItem(at: folder)
         }
+    }
+
+    /// Notes this launch's version and publishes ``completedUpdate`` when it is
+    /// newer than the previous launch's.
+    private func recordLaunch(expectedByInstall: String?, defaults: UserDefaults) {
+        guard let version = currentVersion else { return }
+        let installedInApp = expectedByInstall.map {
+            InstalledVersionStore.verdict(expected: $0, actual: version) == .tookEffect
+        } ?? false
+        guard let update = LaunchVersionStore(defaults: defaults)
+            .recordLaunch(version, installedInApp: installedInApp) else { return }
+        completedUpdate = update
+        delegate?.updateDidComplete(update)
     }
 
     /// Answers the question the previous run could not: did the install that

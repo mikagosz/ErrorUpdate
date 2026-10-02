@@ -17,7 +17,7 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.5** — used in the author's own apps across five integrations. The
+> Status: **1.0.6** — used in the author's own apps across five integrations. The
 > public API is considered stable: from here on, anything that breaks a compiling
 > integration means a major version. Feedback and issues welcome.
 >
@@ -42,7 +42,7 @@ and **self-updating** to macOS apps distributed outside the App Store.
 - **Verified Downloads:** Authenticity comes from the Ed25519 signature — once a public key is configured, an update without a valid signature is refused, and a manifest that omits the signature cannot turn the check off. SHA-256 catches a corrupted transfer only, since the checksum arrives from the same manifest as the download URL.
 - **Same-App, Same-Signer Install:** Before an update replaces the running app, its `CFBundleIdentifier` must match and its code signature must satisfy the running app's designated requirement. See the limitations below for what this cannot do for ad-hoc signed apps.
 - **Safe Install & Relaunch:** The previous version is kept as a backup until the copy succeeds; the app can relaunch into the new version. Since 1.0.2 the new copy opens only after the old process has ended, so a menu bar app never shows two icons at once. Since 1.0.3 `installUpdate` returns what it did, with the version read from the new bundle on disk. Since 1.0.5 `installLocationProblem` tells up front when the app cannot replace itself (opened from Downloads, from a disk image, or from a folder the user cannot write to).
-- **Install Verification:** The version an install promised is checked against the version the app actually reports afterwards. A release packaged without bumping `CFBundleShortVersionString` is reported instead of being offered again on every check.
+- **Install Verification:** The version an install promised is checked against the version the app actually reports afterwards. A release packaged without bumping `CFBundleShortVersionString` is reported instead of being offered again on every check. Since 1.0.6 the first launch of a newer version — however it was installed — is reported once as `completedUpdate`, for work that has to follow the app to a new version.
 - **SwiftUI Integration:** `ErrorUpdateManager` is an `ObservableObject` — bind `pendingReports` and `availableUpdate` directly to your views. Ready-made dialogs (`UIPresenter`) are included and themeable, so they can look like your app rather than like this framework.
 - **Static Hosting Friendly:** The "server" is just two static files — works with GitHub Pages/Releases or any file host.
 - **Release CLI:** `errorupdate-tool` generates signing keys and release manifests.

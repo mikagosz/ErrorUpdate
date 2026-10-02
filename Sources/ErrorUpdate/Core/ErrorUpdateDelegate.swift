@@ -30,6 +30,13 @@ public protocol ErrorUpdateDelegate: AnyObject {
     /// before the delegate is assigned — so the launch-time case may only be
     /// visible through `ErrorUpdateManager.ineffectiveUpdate`, which keeps it.
     func updateDidNotTakeEffect(_ report: IneffectiveUpdate)
+
+    /// Called on the first launch of a newer version — see ``CompletedUpdate``.
+    ///
+    /// Like ``updateDidNotTakeEffect(_:)`` it happens inside `configure(_:)`,
+    /// usually before the delegate is assigned; `ErrorUpdateManager.completedUpdate`
+    /// keeps it for the whole run.
+    func updateDidComplete(_ update: CompletedUpdate)
 }
 
 public extension ErrorUpdateDelegate {
@@ -37,4 +44,5 @@ public extension ErrorUpdateDelegate {
     func didDetectUpdate(_ info: UpdateInfo) {}
     func updateDidFail(_ error: Error) {}
     func updateDidNotTakeEffect(_ report: IneffectiveUpdate) {}
+    func updateDidComplete(_ update: CompletedUpdate) {}
 }

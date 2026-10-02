@@ -153,6 +153,27 @@ public struct IneffectiveUpdate: Equatable, Sendable {
     }
 }
 
+/// The first launch of a newer version than the previous launch ran.
+///
+/// Reported once, on the launch that notices it, whatever brought the new
+/// version in — the in-app install, an installer package or a manual copy.
+/// Use it for anything that has to follow the app to a new version: re-register
+/// a privileged helper, migrate data, show "what's new".
+public struct CompletedUpdate: Equatable, Sendable {
+    /// The version the previous launch ran.
+    public let previousVersion: String
+    /// The version running now.
+    public let currentVersion: String
+    /// `true` when this library's own install produced this version.
+    public let installedInApp: Bool
+
+    public init(previousVersion: String, currentVersion: String, installedInApp: Bool) {
+        self.previousVersion = previousVersion
+        self.currentVersion = currentVersion
+        self.installedInApp = installedInApp
+    }
+}
+
 /// Who started an update check — decides whether a skipped version is shown.
 /// See ``ErrorUpdateManager/checkForUpdates(_:)``.
 public enum UpdateCheckTrigger: Sendable, Equatable {
