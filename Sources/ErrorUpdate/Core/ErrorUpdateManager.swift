@@ -54,7 +54,9 @@ public final class ErrorUpdateManager: ObservableObject {
     private var serverClient: ServerClient?
     private var updateChecker: UpdateChecker?
     private var updateDownloader: UpdateDownloader?
-    private let updateInstaller = UpdateInstaller()
+    /// Internal and settable so tests can point it at a throwaway bundle —
+    /// the default targets the running app.
+    var updateInstaller = UpdateInstaller()
     private let updateScheduler = UpdateScheduler()
     private let installedVersions = InstalledVersionStore()
 
@@ -366,9 +368,15 @@ public final class ErrorUpdateManager: ObservableObject {
     }
 
     /// Installs the previously downloaded update and relaunches the app.
-    /// - Parameter relaunch: When `true`, the app restarts into the new version.
-    public func installUpdate(relaunch: Bool = true) async {
-        guard let fileURL = downloadedUpdateURL else { return }
+    /// - Parameter relaunch: When `true`, the app restarts into the new version
+    ///   once this process has ended.
+    /// - Returns: What happened. `.installed` carries the version read from the
+    ///   new bundle's `Info.plist` on disk — `Bundle.main` keeps the plist it
+    ///   launched with and would still report the old version after the swap.
+    ///   Ignoring the result is fine; the delegate still hears about failures.
+    @discardableResult
+    public func installUpdate(relaunch: Bool = true) async -> UpdateInstallResult {
+        guard let fileURL = downloadedUpdateURL else { return .nothingDownloaded }
         let installer = updateInstaller
         // Written before the swap, not after: from here on the process can be
         // replaced at any moment, and the next launch is the only place where
@@ -387,15 +395,26 @@ public final class ErrorUpdateManager: ObservableObject {
             // full download (17 MB in one measured app) would sit in $TMPDIR
             // until a reboot, once per update.
             Self.removeDownloadArtifacts(of: fileURL)
+            let result = UpdateInstallResult.installed(
+                version: UpdateInstaller.shortVersion(ofAppAt: installedAppURL),
+                appURL: installedAppURL)
             if relaunch {
                 installer.relaunch(appAt: installedAppURL)
             }
+            return result
         } catch {
             // Nothing was swapped, so there is no install to pass judgement on
             // at the next launch.
             installedVersions.clearExpectation()
             delegate?.updateDidFail(error)
+            return .failed(error)
         }
+    }
+
+    /// Hands the manager an already downloaded archive, as `downloadUpdate()`
+    /// would. Tests only: lets `installUpdate` run without a server.
+    func stageDownloadedUpdate(_ fileURL: URL) {
+        downloadedUpdateURL = fileURL
     }
 
     /// Removes the per-download directory the downloader created for `fileURL`,

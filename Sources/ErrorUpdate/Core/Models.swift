@@ -153,6 +153,33 @@ public struct IneffectiveUpdate: Equatable, Sendable {
     }
 }
 
+/// What ``ErrorUpdateManager/installUpdate(relaunch:)`` did.
+///
+/// Before 1.0.3 the call returned nothing, and every app worked out the
+/// outcome itself by reading the `Info.plist` on disk after the swap.
+public enum UpdateInstallResult: Sendable {
+    /// The new bundle is in place. `version` comes from its `Info.plist` on
+    /// disk (`nil` only if that file could not be read); `appURL` is where it sits.
+    case installed(version: String?, appURL: URL)
+    /// There was no downloaded update — call `downloadUpdate()` first.
+    case nothingDownloaded
+    /// Nothing was swapped; the running app is untouched. The same error went
+    /// to the delegate's `updateDidFail(_:)`.
+    case failed(any Error)
+
+    /// `true` for `.installed`.
+    public var isInstalled: Bool {
+        if case .installed = self { return true }
+        return false
+    }
+
+    /// The version now on disk, for `.installed`.
+    public var installedVersion: String? {
+        if case .installed(let version, _) = self { return version }
+        return nil
+    }
+}
+
 /// Information about the system where the error occurred.
 public struct SystemInfo: Codable, Equatable, Sendable {
     public let osVersion: String

@@ -353,6 +353,11 @@ public final class UpdateInstaller: Sendable {
             && !requirement.contains("certificate")
     }
 
+    /// `CFBundleShortVersionString` read from the bundle's `Info.plist` on disk.
+    static func shortVersion(ofAppAt appURL: URL) -> String? {
+        infoValue("CFBundleShortVersionString", ofAppAt: appURL)
+    }
+
     private static func bundleIdentifier(ofAppAt appURL: URL) -> String? {
         infoValue("CFBundleIdentifier", ofAppAt: appURL)
     }

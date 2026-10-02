@@ -166,6 +166,24 @@ Task {
 }
 ```
 
+`installUpdate` returns an `UpdateInstallResult` (since 1.0.3; you may ignore it).
+To show the outcome yourself, install without relaunching and read it:
+
+```swift
+let result = await ErrorUpdateManager.shared.installUpdate(relaunch: false)
+switch result {
+case .installed(let version, _):  // version read from the new Info.plist on disk
+    print("Installed \(version ?? "?") — restart to use it")
+case .failed(let error):          // nothing was swapped; the app is untouched
+    print(error.localizedDescription)
+case .nothingDownloaded:
+    break
+}
+```
+
+With `relaunch: true` the new copy opens only after the running one has quit,
+so a menu bar app never shows two icons at once.
+
 The downloaded file is verified in three steps, and installation stops at the
 first one that fails:
 
