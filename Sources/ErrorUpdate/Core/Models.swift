@@ -153,6 +153,15 @@ public struct IneffectiveUpdate: Equatable, Sendable {
     }
 }
 
+/// Who started an update check — decides whether a skipped version is shown.
+/// See ``ErrorUpdateManager/checkForUpdates(_:)``.
+public enum UpdateCheckTrigger: Sendable, Equatable {
+    /// The user asked ("Check Now"): always asks the server, shows everything.
+    case user
+    /// The app checked on its own: 1-hour cache, skipped version stays quiet.
+    case automatic
+}
+
 /// What ``ErrorUpdateManager/installUpdate(relaunch:)`` did.
 ///
 /// Before 1.0.3 the call returned nothing, and every app worked out the

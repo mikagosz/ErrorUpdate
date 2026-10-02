@@ -86,13 +86,13 @@ private final class StateManifestURLProtocol: URLProtocol {
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0")
         let (manager, _) = makeManager()
 
-        await manager.checkForUpdates(force: true)
+        await manager.checkForUpdates(.user)
         #expect(manager.availableUpdate?.latestVersion == "2.0.0",
                 "Precondition: a forced check must find the version")
 
         // The cache is fresh after the previous check, so the checker answers
         // "did not check" — which is not an answer of "there is no update".
-        await manager.checkForUpdates(force: false)
+        await manager.checkForUpdates(.automatic)
 
         #expect(manager.availableUpdate?.latestVersion == "2.0.0",
                 "A periodic check must not wipe an update that was already found")
@@ -107,16 +107,50 @@ private final class StateManifestURLProtocol: URLProtocol {
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0")
         let (manager, defaults) = makeManager()
 
-        await manager.checkForUpdates(force: true)
+        await manager.checkForUpdates(.user)
         #expect(manager.availableUpdate != nil, "Precondition: the prompt is there")
 
         // The server withdraws the release; clear the cache so the question really goes out.
         StateManifestURLProtocol.setManifest(latestVersion: "2.0.0", available: false)
         defaults.removeObject(forKey: "ErrorUpdate_LastUpdateCheckDate")
 
-        await manager.checkForUpdates(force: false)
+        await manager.checkForUpdates(.automatic)
 
         #expect(manager.availableUpdate == nil,
                 "A withdrawn release must clear the prompt, not stay on screen")
+    }
+
+    // MARK: 3. "Skip This Version" holds for automatic checks (1.0.4)
+    //
+    // Found in the VoiceAI audit 2026-10-01: the app's monthly timer called
+    // checkForUpdates() with its default force: true, so the version the user
+    // had skipped came back every month.
+
+    @Test func skippedVersion_quietOnAutomatic_shownOnUser() async {
+        StateManifestURLProtocol.setManifest(latestVersion: "2.0.0")
+        let (manager, defaults) = makeManager()
+
+        manager.skipVersion("2.0.0")
+        #expect(manager.skippedVersion == "2.0.0")
+
+        await manager.checkForUpdates(.automatic)
+        #expect(manager.availableUpdate == nil, "An automatic check must keep a skipped version quiet")
+
+        await manager.checkForUpdates(.user)
+        #expect(manager.availableUpdate?.latestVersion == "2.0.0", "A user check must still show it")
+
+        // A newer release than the skipped one is announced again.
+        StateManifestURLProtocol.setManifest(latestVersion: "2.0.1")
+        defaults.removeObject(forKey: "ErrorUpdate_LastUpdateCheckDate")
+        await manager.checkForUpdates(.automatic)
+        #expect(manager.availableUpdate?.latestVersion == "2.0.1")
+    }
+
+    @Test func skipVersion_writesTheStoreTheCheckReads() async {
+        let (manager, defaults) = makeManager()
+        manager.skipVersion("3.1.0")
+        #expect(SkippedVersionStore(defaults: defaults).skippedVersion == "3.1.0")
+        manager.clearSkippedVersion()
+        #expect(manager.skippedVersion == nil)
     }
 }

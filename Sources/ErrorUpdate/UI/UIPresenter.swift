@@ -157,7 +157,7 @@ private struct UpdateAvailableWindowContent: View {
             },
             onLater: onClose,
             onSkip: {
-                SkippedVersionStore().skip(updateInfo.latestVersion)
+                ErrorUpdateManager.shared.skipVersion(updateInfo.latestVersion)
                 onClose()
             }
         )

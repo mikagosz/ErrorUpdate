@@ -17,7 +17,7 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.3** — used in the author's own apps across five integrations. The
+> Status: **1.0.4** — used in the author's own apps across five integrations. The
 > public API is considered stable: from here on, anything that breaks a compiling
 > integration means a major version. Feedback and issues welcome.
 >
@@ -38,7 +38,7 @@ and **self-updating** to macOS apps distributed outside the App Store.
 - **Automatic Crash Reporting:** Captures native Objective-C exceptions and fatal signals (e.g. `SIGSEGV`) using async-signal-safe file writes; the crash is turned into a report on the next launch.
 - **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context.
 - **Local Report Store:** Reports are persisted on disk and deduplicated (identical errors within 24 h merge into one entry with a counter).
-- **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff.
+- **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff. Since 1.0.4 a check says who started it — `checkForUpdates(.user)` or `.automatic` — and "Skip This Version" (`skipVersion(_:)`) holds for automatic checks only.
 - **Verified Downloads:** Authenticity comes from the Ed25519 signature — once a public key is configured, an update without a valid signature is refused, and a manifest that omits the signature cannot turn the check off. SHA-256 catches a corrupted transfer only, since the checksum arrives from the same manifest as the download URL.
 - **Same-App, Same-Signer Install:** Before an update replaces the running app, its `CFBundleIdentifier` must match and its code signature must satisfy the running app's designated requirement. See the limitations below for what this cannot do for ad-hoc signed apps.
 - **Safe Install & Relaunch:** The previous version is kept as a backup until the copy succeeds; the app can relaunch into the new version. Since 1.0.2 the new copy opens only after the old process has ended, so a menu bar app never shows two icons at once. Since 1.0.3 `installUpdate` returns what it did, with the version read from the new bundle on disk.

@@ -110,9 +110,23 @@ from the report dialog, where they can see what they are sending.
 ```swift
 // In a menu action or button handler:
 Task {
-    await ErrorUpdateManager.shared.checkForUpdates() // force = true, ignores the 1h cache
+    await ErrorUpdateManager.shared.checkForUpdates(.user) // ignores the 1h cache, shows everything
+}
+
+// A check the app starts on its own (at launch, on its own timer):
+Task {
+    await ErrorUpdateManager.shared.checkForUpdates(.automatic) // 1h cache, a skipped version stays quiet
 }
 ```
+
+Pick the trigger by who started the check, not by how often it runs. The
+older `checkForUpdates(force:)` is deprecated since 1.0.4: its default,
+`force: true`, is a user check, so an automatic check written as
+`checkForUpdates()` ignored "Skip This Version".
+
+To remember a dismissed version from your own update window, call
+`ErrorUpdateManager.shared.skipVersion(info.latestVersion)` — not the defaults
+key directly. `skippedVersion` and `clearSkippedVersion()` read and reset it.
 
 The result lands in the published `availableUpdate` property.
 
@@ -145,7 +159,7 @@ The framework notices on the next launch and:
 - writes the same message to stderr,
 - **stops offering that exact version** on automatic checks.
 
-A manual `checkForUpdates()` still shows it, so a rebuilt release under the same
+A `checkForUpdates(.user)` still shows it, so a rebuilt release under the same
 number can be installed without the user clearing anything. Any newer version is
 unaffected, and the warning clears itself once a version that takes effect is
 installed.

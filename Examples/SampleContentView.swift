@@ -38,7 +38,7 @@ struct SampleContentView: View {
             }
 
             Button("Check for Updates Manually") {
-                Task { await ErrorUpdateManager.shared.checkForUpdates() }
+                Task { await ErrorUpdateManager.shared.checkForUpdates(.user) }
             }
 
             if let update = manager.availableUpdate {

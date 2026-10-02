@@ -54,6 +54,9 @@ public final class ErrorUpdateManager: ObservableObject {
     private var serverClient: ServerClient?
     private var updateChecker: UpdateChecker?
     private var updateDownloader: UpdateDownloader?
+    /// The store the update check reads, so ``skipVersion(_:)`` writes where
+    /// the check looks. Replaced on `configure` with the configured defaults.
+    private var skippedVersions = SkippedVersionStore()
     /// Internal and settable so tests can point it at a throwaway bundle —
     /// the default targets the running app.
     var updateInstaller = UpdateInstaller()
@@ -132,10 +135,11 @@ public final class ErrorUpdateManager: ObservableObject {
         serverClient = client
         updateChecker = UpdateChecker(serverClient: client, currentVersion: version,
                                       userDefaults: userDefaults)
+        skippedVersions = SkippedVersionStore(defaults: userDefaults)
         updateDownloader = UpdateDownloader(config: config)
 
         updateScheduler.onTick = { [weak self] in
-            Task { await self?.checkForUpdates(force: false) }
+            Task { await self?.checkForUpdates(.automatic) }
         }
 
         isConfigured = true
@@ -305,12 +309,45 @@ public final class ErrorUpdateManager: ObservableObject {
 
     /// Checks the server for a new version. Updates `availableUpdate`.
     ///
+    /// - `.user` — someone pressed "Check Now": asks the server even if a check
+    ///   ran within the hour, and shows the newest version even if it was
+    ///   skipped or once installed without effect.
+    /// - `.automatic` — a check the app started on its own (at launch, on a
+    ///   timer): respects the 1-hour cache, keeps a skipped version quiet and
+    ///   does not offer again a version that installed without effect.
+    ///
     /// A check the 1-hour cache skips leaves `availableUpdate` as it was — silence
     /// from the cache is not an answer that there is no update.
-    ///
-    /// - Parameter force: Pass `true` (default) for user-initiated checks;
-    ///   automatic periodic checks pass `false` to respect the 1-hour cache.
+    public func checkForUpdates(_ trigger: UpdateCheckTrigger) async {
+        await performCheck(force: trigger == .user)
+    }
+
+    /// The pre-1.0.4 form. `force: true` — also the default — is a user check:
+    /// "Skip This Version" is ignored. One app called it with the default from
+    /// its monthly timer and kept showing the version the user had skipped.
+    @available(*, deprecated, message: "Use checkForUpdates(.user) or checkForUpdates(.automatic); the default force: true ignores \"Skip This Version\".")
     public func checkForUpdates(force: Bool = true) async {
+        await performCheck(force: force)
+    }
+
+    /// Remembers that the user does not want to hear about `version`.
+    /// Automatic checks stay quiet until a newer version appears; a `.user`
+    /// check still shows it. Apps used to write the defaults key themselves.
+    public func skipVersion(_ version: String) {
+        skippedVersions.skip(version)
+    }
+
+    /// The version currently skipped, if any.
+    public var skippedVersion: String? {
+        skippedVersions.skippedVersion
+    }
+
+    /// Forgets the skipped version.
+    public func clearSkippedVersion() {
+        skippedVersions.clear()
+    }
+
+    private func performCheck(force: Bool) async {
         guard let updateChecker else {
             warnNotConfigured()
             return

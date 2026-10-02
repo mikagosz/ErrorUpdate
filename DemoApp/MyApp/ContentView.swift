@@ -64,7 +64,7 @@ struct ContentView: View {
                     Button(loc.t("Sprawdź dostępność", "Check for updates")) {
                         Task {
                             isCheckingForUpdate = true
-                            await manager.checkForUpdates()
+                            await manager.checkForUpdates(.user)
                             isCheckingForUpdate = false
                         }
                     }
