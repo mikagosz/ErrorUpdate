@@ -27,6 +27,20 @@ public final class UIPresenter {
 
     // MARK: - Error Report Presentation
 
+    /// Presents the error report confirmation dialog, sending to
+    /// `ErrorUpdateConfig.supportEmail`. Without a configured address nothing is
+    /// shown — a "Send" button with nowhere to send would only mislead.
+    /// - Returns: `false` when no address is configured.
+    @discardableResult
+    public func present(report: ErrorReport) -> Bool {
+        guard let address = ErrorUpdateManager.shared.supportEmail else {
+            fputs("ErrorUpdate: no supportEmail configured — report dialog not shown\n", stderr)
+            return false
+        }
+        present(report: report, supportEmail: address)
+        return true
+    }
+
     /// Presents the error report confirmation dialog.
     /// - Parameter supportEmail: Recipient address used when the user chooses to send.
     public func present(report: ErrorReport, supportEmail: String) {

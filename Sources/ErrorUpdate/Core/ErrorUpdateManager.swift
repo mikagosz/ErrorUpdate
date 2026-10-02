@@ -53,6 +53,15 @@ public final class ErrorUpdateManager: ObservableObject {
     /// Tests only: the test host has no app version of its own.
     var bundleVersionOverride: String?
 
+    /// The address error reports go to when the user chooses to send one —
+    /// `ErrorUpdateConfig.supportEmail`. Before 1.0.8 the field was stored and
+    /// never read: every app set it, and no report could reach it.
+    public var supportEmail: String? {
+        guard let address = config?.supportEmail?.trimmingCharacters(in: .whitespaces),
+              !address.isEmpty else { return nil }
+        return address
+    }
+
     // MARK: - Private
 
     private var config: ErrorUpdateConfig?

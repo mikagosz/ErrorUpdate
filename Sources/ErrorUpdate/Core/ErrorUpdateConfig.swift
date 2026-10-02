@@ -34,7 +34,8 @@ public struct ErrorUpdateConfig: Sendable {
     public let maxDownloadBytes: Int64
     /// When `true`, saved error reports are also sent to the server automatically.
     public var reportingOptIn: Bool
-    /// Email address error reports are addressed to when using the mail composer.
+    /// Email address error reports are addressed to when the user sends one —
+    /// read through `ErrorUpdateManager.supportEmail` and `UIPresenter.present(report:)` (1.0.8).
     public var supportEmail: String?
 
     public init(

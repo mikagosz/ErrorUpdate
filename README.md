@@ -17,7 +17,7 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.7** — used in ten of the author's own apps. The public API is
+> Status: **1.0.8** — used in ten of the author's own apps. The public API is
 > considered stable: from here on, anything that breaks a compiling integration
 > means a major version. Feedback and issues welcome.
 >
@@ -37,7 +37,7 @@ and **self-updating** to macOS apps distributed outside the App Store.
 ## Features
 
 - **Automatic Crash Reporting:** Captures native Objective-C exceptions and fatal signals (e.g. `SIGSEGV`) using async-signal-safe file writes; the crash is turned into a report on the next launch. Since 1.0.7 also main-thread hangs (`startHangDetection`, including one ended by a force quit) and operations that overrun their limit (`beginOperation` / `watchOperation`).
-- **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context.
+- **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context. Since 1.0.8 the configured `supportEmail` is where a report goes when the user sends it (`UIPresenter.present(report:)`, `ErrorUpdateManager.supportEmail`).
 - **Local Report Store:** Reports are persisted on disk and deduplicated (identical errors within 24 h merge into one entry with a counter).
 - **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff. Since 1.0.4 a check says who started it — `checkForUpdates(.user)` or `.automatic` — and "Skip This Version" (`skipVersion(_:)`) holds for automatic checks only.
 - **Verified Downloads:** Authenticity comes from the Ed25519 signature — once a public key is configured, an update without a valid signature is refused, and a manifest that omits the signature cannot turn the check off. SHA-256 catches a corrupted transfer only, since the checksum arrives from the same manifest as the download URL.
@@ -57,7 +57,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.7"),
+    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.8"),
 ]
 ```
 

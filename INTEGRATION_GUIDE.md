@@ -113,6 +113,15 @@ try await ErrorUpdateManager.shared.watchOperation("backup", limit: 600) {
   `customContext["errorUpdate.kind"]` (`hang`, `hangUntilExit`,
   `operationOverdue`), so existing switches over `ErrorType` keep compiling.
 
+### Letting the user send a report
+
+Since 1.0.8 the address in `ErrorUpdateConfig(supportEmail:)` is the one reports
+go to. `ErrorUpdateManager.shared.supportEmail` returns it (trimmed, `nil` when
+empty), and `UIPresenter().present(report:)` shows the confirmation dialog
+addressed to it — or nothing, when no address is configured. An app with its own
+window calls `EmailComposer.send(report:to:)` with that address: the system mail
+composer opens with the report attached, and the user sends it.
+
 ### What you are collecting
 
 A report contains the error message, the stack trace, app and OS versions,
