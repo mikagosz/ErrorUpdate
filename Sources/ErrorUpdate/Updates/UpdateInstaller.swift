@@ -88,13 +88,21 @@ public final class UpdateInstaller: Sendable {
         }
     }
 
-    /// Launches a new instance of the app at `appURL` and terminates this one.
+    /// Terminates this app and opens the copy at `appURL` once this process is gone.
+    ///
+    /// The new copy is opened by a small helper that waits for this process to
+    /// end first. Opening it straight away (`open -n`, before 1.0.2) left two
+    /// copies running for a moment — two menu bar icons, two global key monitors.
+    /// If the helper cannot be started, the app keeps running: the new version is
+    /// already on disk and takes over at the next manual restart.
     @MainActor
     public func relaunch(appAt appURL: URL) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-n", appURL.path]
-        try? process.run()
+        do {
+            try RelaunchHelper.start(waitingFor: ProcessInfo.processInfo.processIdentifier, app: appURL)
+        } catch {
+            Self.warn("could not start the relaunch helper (\(error.localizedDescription)); the app stays open")
+            return
+        }
         NSApp.terminate(nil)
     }
 
