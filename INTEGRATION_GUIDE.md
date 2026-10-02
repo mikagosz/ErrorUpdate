@@ -82,6 +82,37 @@ await ErrorUpdateManager.shared.sendPendingReports()
 
 At most 50 reports are kept on disk; past that the oldest are dropped.
 
+### Hangs and operations that never end
+
+Crash handlers only see crashes. Since 1.0.7 two kinds of trouble that do not
+crash are reported too, into the same local store:
+
+```swift
+// The spinning cursor: the main thread does not answer for 5 s.
+ErrorUpdateManager.shared.startHangDetection(threshold: 5)
+
+// An operation that must not hang forever — waiting on a process, the disk, a backup.
+let watch = ErrorUpdateManager.shared.beginOperation("ramCleanup", limit: 60)
+defer { watch.end() }
+
+// Or, around async work:
+try await ErrorUpdateManager.shared.watchOperation("backup", limit: 600) {
+    try await runBackup()
+}
+```
+
+- A hang is reported once the main thread answers again, with its duration.
+  A hang the app never recovers from (usually a force quit) leaves a marker
+  file and is reported on the next launch.
+- An overdue operation is reported once, with its name, its limit and the call
+  stack it was started from. Nothing is interrupted — the report only says
+  where to look.
+- Hang reports carry no stack trace: the main thread's stack cannot be read
+  from the thread watching it.
+- These reports use `errorType` `.swiftError` and say what they are in
+  `customContext["errorUpdate.kind"]` (`hang`, `hangUntilExit`,
+  `operationOverdue`), so existing switches over `ErrorType` keep compiling.
+
 ### What you are collecting
 
 A report contains the error message, the stack trace, app and OS versions,

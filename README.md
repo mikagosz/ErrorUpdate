@@ -17,9 +17,9 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.6** — used in the author's own apps across five integrations. The
-> public API is considered stable: from here on, anything that breaks a compiling
-> integration means a major version. Feedback and issues welcome.
+> Status: **1.0.7** — used in ten of the author's own apps. The public API is
+> considered stable: from here on, anything that breaks a compiling integration
+> means a major version. Feedback and issues welcome.
 >
 > 0.2.0 was a security release and **changes behaviour in ways that can stop
 > updates**: signatures became mandatory, plain HTTP is refused, and an update
@@ -28,14 +28,15 @@ and **self-updating** to macOS apps distributed outside the App Store.
 > The check → download → install cycle has been run end to end against a live
 > server, in both directions: a legitimate update installs, and a package with a
 > valid SHA-256 **and** a valid Ed25519 signature is still rejected when its code
-> signature comes from a different identity. Still beta because `relaunch` and the
-> crash handlers have not been exercised for real — the first restarts the app,
-> the second needs an actual fatal signal — and because nobody outside the
+> signature comes from a different identity. Since 1.0.7 the rest has been run
+> for real as well: an app updated itself from 1.0 to 1.1 and relaunched with never
+> more than one copy running, a real `SIGSEGV` became a report on the next launch,
+> and a hang ended by `kill -9` was reported on the next launch. Nobody outside the
 > author's own apps uses it yet.
 
 ## Features
 
-- **Automatic Crash Reporting:** Captures native Objective-C exceptions and fatal signals (e.g. `SIGSEGV`) using async-signal-safe file writes; the crash is turned into a report on the next launch.
+- **Automatic Crash Reporting:** Captures native Objective-C exceptions and fatal signals (e.g. `SIGSEGV`) using async-signal-safe file writes; the crash is turned into a report on the next launch. Since 1.0.7 also main-thread hangs (`startHangDetection`, including one ended by a force quit) and operations that overrun their limit (`beginOperation` / `watchOperation`).
 - **Manual Error Logging:** `ErrorUpdateManager.shared.logError()` reports non-fatal Swift errors with custom context.
 - **Local Report Store:** Reports are persisted on disk and deduplicated (identical errors within 24 h merge into one entry with a counter).
 - **Update Checking:** Periodically checks a remote server for new versions, with retry and exponential backoff. Since 1.0.4 a check says who started it — `checkForUpdates(.user)` or `.automatic` — and "Skip This Version" (`skipVersion(_:)`) holds for automatic checks only.
@@ -56,7 +57,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.0"),
+    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.7"),
 ]
 ```
 

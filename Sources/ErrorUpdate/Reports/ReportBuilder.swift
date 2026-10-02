@@ -40,6 +40,45 @@ public enum ReportBuilder {
         )
     }
 
+    /// Context key marking what kind of trouble a report describes, for the
+    /// kinds `ErrorType` has no case for. Adding cases to the public enum would
+    /// break exhaustive switches in existing apps.
+    static let kindKey = "errorUpdate.kind"
+
+    /// The main thread did not answer for `duration` seconds and then recovered.
+    /// The message stays the same for every hang so repeats merge into one report.
+    static func build(hangDuration duration: TimeInterval) -> ErrorReport {
+        ErrorReport(
+            errorType: .swiftError,
+            errorMessage: "Main thread stopped responding",
+            customContext: [kindKey: "hang",
+                            "durationSeconds": String(format: "%.1f", duration)]
+        )
+    }
+
+    /// The main thread stopped answering and the app ended before it recovered —
+    /// most often the user force-quit it. Found on the next launch.
+    static func build(unfinishedHangStartedAt started: Date) -> ErrorReport {
+        ErrorReport(
+            errorType: .swiftError,
+            errorMessage: "Main thread stopped responding and the app ended before it recovered",
+            customContext: [kindKey: "hangUntilExit",
+                            "hangStarted": ISO8601DateFormatter().string(from: started)]
+        )
+    }
+
+    /// A watched operation did not end within its limit.
+    static func build(overdue: OperationWatch.Overdue) -> ErrorReport {
+        ErrorReport(
+            errorType: .swiftError,
+            errorMessage: "Operation did not finish within its limit: \(overdue.name)",
+            stackTrace: overdue.startedFrom,
+            customContext: [kindKey: "operationOverdue",
+                            "operation": overdue.name,
+                            "limitSeconds": String(format: "%.0f", overdue.limit)]
+        )
+    }
+
     /// Formats an `ErrorReport` into a human-readable plain text string.
     public static func formatAsPlainText(report: ErrorReport) -> String {
         var components = [String]()

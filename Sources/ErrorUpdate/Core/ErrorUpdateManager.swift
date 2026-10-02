@@ -68,6 +68,10 @@ public final class ErrorUpdateManager: ObservableObject {
     var updateInstaller = UpdateInstaller()
     private let updateScheduler = UpdateScheduler()
     private let installedVersions = InstalledVersionStore()
+    private var hangDetector: HangDetector?
+    /// Next to the raw crash file. Internal and settable for tests.
+    var hangMarkerURL = CrashCatcher.crashReportURL().deletingLastPathComponent()
+        .appendingPathComponent("hang.marker")
 
     /// Apps use ``shared``. This exists so tests can hold an instance of their
     /// own: the singleton and its `UserDefaults` keys are shared by every test
@@ -155,6 +159,7 @@ public final class ErrorUpdateManager: ObservableObject {
         // previous run's install.
         if !isReconfiguration {
             processPendingCrashFile()
+            processUnfinishedHang()
             // Read before the verification clears it: an install of exactly
             // this version means the new version came from this library.
             let expectedByInstall = installedVersions.expectedVersion
@@ -172,6 +177,60 @@ public final class ErrorUpdateManager: ObservableObject {
         guard warnIfNotConfigured() else { return }
         CrashCatcher.register()
         SignalHandler.register()
+    }
+
+    // MARK: - Hangs and Stuck Operations
+
+    /// Starts watching the main thread: when it does not answer for `threshold`
+    /// seconds (the spinning cursor), a report is filed once it recovers. A hang
+    /// the app never recovers from — usually a force quit — is reported on the
+    /// next launch. These reports carry no stack trace: the main thread's stack
+    /// cannot be read from the watching thread.
+    public func startHangDetection(threshold: TimeInterval = 5) {
+        guard warnIfNotConfigured() else { return }
+        hangDetector?.stop()
+        let detector = HangDetector(threshold: threshold, markerURL: hangMarkerURL) { [weak self] duration in
+            Task { @MainActor in self?.file(ReportBuilder.build(hangDuration: duration)) }
+        }
+        hangDetector = detector
+        detector.start()
+    }
+
+    /// Stops watching the main thread.
+    public func stopHangDetection() {
+        hangDetector?.stop()
+        hangDetector = nil
+    }
+
+    /// Starts watching an operation that should end within `limit` seconds —
+    /// a cleanup, a backup, a scan, anything that waits on another process or
+    /// the disk. Call `end()` on the result when it finishes; if `limit` passes
+    /// first, one report is filed with the operation's name and the call stack
+    /// it was started from. Nothing is interrupted.
+    public func beginOperation(_ name: String, limit: TimeInterval) -> OperationWatch {
+        OperationWatch(name: name, limit: limit) { [weak self] overdue in
+            Task { @MainActor in self?.file(ReportBuilder.build(overdue: overdue)) }
+        }
+    }
+
+    /// Runs `body` under ``beginOperation(_:limit:)`` and ends the watch however it returns.
+    public func watchOperation<T>(_ name: String, limit: TimeInterval,
+                                  _ body: () async throws -> T) async rethrows -> T {
+        let watch = beginOperation(name, limit: limit)
+        defer { watch.end() }
+        return try await body()
+    }
+
+    /// Reports a hang the previous run never recovered from. Internal so tests
+    /// can call it: `configure()` does so only on the first configuration.
+    func processUnfinishedHang() {
+        guard let started = HangDetector.takeUnfinishedHang(at: hangMarkerURL) else { return }
+        file(ReportBuilder.build(unfinishedHangStartedAt: started))
+    }
+
+    private func file(_ report: ErrorReport) {
+        delegate?.didCatchError(report)
+        storeAndMaybeSend(report)
     }
 
     /// Logs a non-fatal Swift error. The report is stored locally and, when
@@ -257,6 +316,7 @@ public final class ErrorUpdateManager: ObservableObject {
         // First, before anything is removed: a tick landing mid-erase would put
         // the last-check date straight back.
         updateScheduler.stop()
+        stopHangDetection()
 
         do {
             try reportStore?.eraseAll()
@@ -265,9 +325,10 @@ public final class ErrorUpdateManager: ObservableObject {
             allGone = false
         }
 
-        // Crash file plus the quarantined copy left by an unreadable one.
+        // Crash file, the quarantined copy left by an unreadable one, and the
+        // marker of a hang the last run never recovered from.
         let crashFile = CrashCatcher.crashReportURL()
-        for url in [crashFile, crashFile.appendingPathExtension("unreadable")]
+        for url in [crashFile, crashFile.appendingPathExtension("unreadable"), hangMarkerURL]
         where fileManager.fileExists(atPath: url.path) {
             do { try fileManager.removeItem(at: url) } catch { allGone = false }
         }
