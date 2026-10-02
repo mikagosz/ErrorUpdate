@@ -172,6 +172,21 @@ if let problem = manager.ineffectiveUpdate {
 
 ### Download & Install
 
+Before offering "Install", ask whether the app can replace itself where it sits:
+
+```swift
+if let problem = ErrorUpdateManager.shared.installLocationProblem {
+    // .translocated     — opened straight from Downloads (macOS runs a temporary copy)
+    // .readOnlyVolume   — running from the disk image it came on
+    // .folderNotWritable — the user cannot write to the app's folder
+    Text(problem.localizedDescription)   // says what to do; offer a manual download instead
+}
+```
+
+Since 1.0.5 `downloadUpdate()` and `installUpdate()` refuse up front in those
+cases with an `InstallLocationError`, instead of downloading an archive that
+would fail at the swap.
+
 ```swift
 Task {
     if await ErrorUpdateManager.shared.downloadUpdate() != nil {

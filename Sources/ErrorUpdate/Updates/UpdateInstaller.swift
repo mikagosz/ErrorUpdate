@@ -62,6 +62,12 @@ public final class UpdateInstaller: Sendable {
         }
     }
 
+    /// Why the running app cannot be replaced in place, or `nil` when it can.
+    /// `nil` also when there is no running `.app` to judge (a test host, a tool).
+    public var locationProblem: InstallLocationProblem? {
+        currentAppURL.flatMap { InstallLocationProblem.check($0) }
+    }
+
     /// Installs an update from a local `.dmg` or `.zip` file.
     /// Blocking — call it from a background thread or task.
     /// - Parameter installDirectory: Where to place the new app bundle.
@@ -76,6 +82,11 @@ public final class UpdateInstaller: Sendable {
     @discardableResult
     public func install(_ fileURL: URL, into installDirectory: URL? = nil,
                         expectedVersion: String? = nil) throws -> URL {
+        // Refused before the archive is even opened: a translocated or
+        // read-only copy would get as far as the swap and fail there.
+        if installDirectory == nil, let problem = locationProblem {
+            throw InstallLocationError(problem: problem)
+        }
         switch fileURL.pathExtension.lowercased() {
         case "dmg":
             return try installDmg(at: fileURL, installDirectory: installDirectory,

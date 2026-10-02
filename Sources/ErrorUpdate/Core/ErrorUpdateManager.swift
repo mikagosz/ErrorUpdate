@@ -390,10 +390,23 @@ public final class ErrorUpdateManager: ObservableObject {
     /// Whether a periodic update check is currently scheduled.
     var isPeriodicUpdateCheckRunning: Bool { updateScheduler.isRunning }
 
+    /// Why this app cannot replace itself where it sits — opened straight from
+    /// Downloads, from a disk image, or from a folder the user cannot write to.
+    /// `nil` when an in-app update can go ahead. Check it before offering
+    /// "Install"; `downloadUpdate()` and `installUpdate()` refuse in that case.
+    public var installLocationProblem: InstallLocationProblem? {
+        updateInstaller.locationProblem
+    }
+
     /// Downloads and verifies the available update. Sets `downloadedUpdateURL`.
     @discardableResult
     public func downloadUpdate() async -> URL? {
         guard let info = availableUpdate, let updateDownloader else { return nil }
+        // No point fetching an archive that cannot be installed.
+        if let problem = installLocationProblem {
+            delegate?.updateDidFail(InstallLocationError(problem: problem))
+            return nil
+        }
         do {
             let url = try await updateDownloader.download(info)
             downloadedUpdateURL = url
