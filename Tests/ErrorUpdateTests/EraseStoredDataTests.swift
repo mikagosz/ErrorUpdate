@@ -87,6 +87,19 @@ import Foundation
         #expect(FileManager.default.fileExists(atPath: quarantine.path) == false)
     }
 
+    @Test func eraseAllStoredData_removesHangMarker() throws {
+        let manager = ErrorUpdateManager()
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ErrorUpdate_hang.marker_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        manager.hangMarkerURL = marker
+        try Data("0\n".utf8).write(to: marker)
+
+        manager.eraseAllStoredData()
+
+        #expect(FileManager.default.fileExists(atPath: marker.path) == false)
+    }
+
     // MARK: 5. Sweeps every prefixed key, including future ones
 
     @Test func eraseAllStoredData_sweepsPrefixedDefaults() {

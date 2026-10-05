@@ -56,6 +56,29 @@ public enum ReportBuilder {
         )
     }
 
+    /// Context of a merged duplicate. Every hang shares one message, so repeats
+    /// merge into one report; without this, the report would keep the first
+    /// hang's duration and lose the rest. A hang keeps the longest duration and
+    /// the latest one, a hang until exit keeps its first start and the latest.
+    /// Other kinds keep their first context unchanged.
+    static func mergedContext(_ existing: [String: String]?,
+                              with new: [String: String]?) -> [String: String]? {
+        guard var merged = existing, let new, merged[kindKey] == new[kindKey] else { return existing }
+        switch merged[kindKey] {
+        case "hang":
+            let old = merged["durationSeconds"].flatMap(Double.init) ?? 0
+            if let latest = new["durationSeconds"], let value = Double(latest) {
+                merged["lastDurationSeconds"] = latest
+                if value > old { merged["durationSeconds"] = latest }
+            }
+        case "hangUntilExit":
+            if let latest = new["hangStarted"] { merged["lastHangStarted"] = latest }
+        default:
+            break
+        }
+        return merged
+    }
+
     /// The main thread stopped answering and the app ended before it recovered —
     /// most often the user force-quit it. Found on the next launch.
     static func build(unfinishedHangStartedAt started: Date) -> ErrorReport {

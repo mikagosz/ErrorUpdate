@@ -142,6 +142,29 @@ import Foundation
         #expect(saved[0].count == 2)
     }
 
+    // MARK: 7. Repeated hangs keep the longest duration, not the first
+
+    @Test func mergedHangs_keepLongestAndLatestDuration() async throws {
+        let dir = try testDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = try ReportStore(directory: dir)
+        await save(ReportBuilder.build(hangDuration: 5), to: store)
+        await save(ReportBuilder.build(hangDuration: 60), to: store)
+        await save(ReportBuilder.build(hangDuration: 7), to: store)
+
+        let saved = store.fetchAll()
+        #expect(saved.count == 1)
+        #expect(saved[0].count == 3)
+        #expect(saved[0].customContext?["durationSeconds"] == "60.0")
+        #expect(saved[0].customContext?["lastDurationSeconds"] == "7.0")
+    }
+
+    @Test func mergedOtherReports_keepTheirFirstContext() {
+        let first = ["key": "first"]
+        #expect(ReportBuilder.mergedContext(first, with: ["key": "second"]) == first)
+    }
+
     // MARK: - Helpers
 
     /// Saves and waits for the asynchronous write to complete.

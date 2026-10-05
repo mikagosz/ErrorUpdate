@@ -17,7 +17,7 @@ No paid Apple Developer account required.
 A lightweight, zero-dependency Swift package that adds **crash/error reporting**
 and **self-updating** to macOS apps distributed outside the App Store.
 
-> Status: **1.0.8** — used in ten of the author's own apps. The public API is
+> Status: **1.0.9** — used in ten of the author's own apps. The public API is
 > considered stable: from here on, anything that breaks a compiling integration
 > means a major version. Feedback and issues welcome.
 >
@@ -57,7 +57,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.8"),
+    .package(url: "https://github.com/mikagosz/ErrorUpdate.git", from: "1.0.9"),
 ]
 ```
 

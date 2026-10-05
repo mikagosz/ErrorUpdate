@@ -67,6 +67,8 @@ public final class ReportStore: @unchecked Sendable {
                    existing.timestamp.timeIntervalSinceNow > -self.deduplicationWindow {
                     existing.count += 1
                     existing.timestamp = Date()
+                    existing.customContext = ReportBuilder.mergedContext(existing.customContext,
+                                                                         with: report.customContext)
                     reportToSave = existing
                 }
 

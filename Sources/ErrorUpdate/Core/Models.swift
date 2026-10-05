@@ -27,7 +27,8 @@ public struct ErrorReport: Codable, Equatable, Identifiable, Sendable {
     public let appVersion: String
     public let osVersion: String
     public let systemInfo: SystemInfo
-    public let customContext: [String: String]?
+    /// Mutable: the store folds repeated hangs into it when merging duplicates.
+    public var customContext: [String: String]?
     public var contactEmail: String?
     /// Stable hash of the error's identity, used to deduplicate repeated crashes.
     public let contentHash: String

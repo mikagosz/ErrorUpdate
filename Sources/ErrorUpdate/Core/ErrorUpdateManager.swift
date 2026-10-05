@@ -78,8 +78,10 @@ public final class ErrorUpdateManager: ObservableObject {
     private let updateScheduler = UpdateScheduler()
     private let installedVersions = InstalledVersionStore()
     private var hangDetector: HangDetector?
-    /// Next to the raw crash file. Internal and settable for tests.
-    var hangMarkerURL = CrashCatcher.crashReportURL().deletingLastPathComponent()
+    /// Next to the raw crash file. Internal and settable for tests. Lazy:
+    /// `crashReportURL()` creates the app's folder, which must not happen the
+    /// moment `shared` is first touched, before `configure`.
+    lazy var hangMarkerURL = CrashCatcher.crashReportURL().deletingLastPathComponent()
         .appendingPathComponent("hang.marker")
 
     /// Apps use ``shared``. This exists so tests can hold an instance of their

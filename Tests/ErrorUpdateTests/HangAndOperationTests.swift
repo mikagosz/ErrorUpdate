@@ -117,6 +117,7 @@ import Foundation
     @MainActor
     @Test func hangLeftByPreviousRun_isReportedOnce() async throws {
         let marker = tempURL("hang.marker")
+        defer { try? FileManager.default.removeItem(at: marker) }
         try String(Date().addingTimeInterval(-60).timeIntervalSince1970)
             .write(to: marker, atomically: true, encoding: .utf8)
         let (manager, dir) = try manager(marker: marker)

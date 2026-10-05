@@ -11,6 +11,9 @@ import Foundation
 /// A ping left unanswered longer than `threshold` is a hang. It is measured
 /// from the ping, not from the last answer, so a timer that macOS delayed
 /// (App Nap) cannot pass for a hang: no ping is outstanding then.
+/// Time is the system uptime, which stands still while the Mac sleeps — on the
+/// wall clock a ping sent just before sleep would come back as a hang as long
+/// as the sleep.
 ///
 /// While a hang lasts, a marker file holds its start time. A hang that ends
 /// normally removes it and reports the duration; a hang the user ends by
@@ -27,8 +30,9 @@ final class HangDetector: @unchecked Sendable {
     private let queue = DispatchQueue(label: "ErrorUpdate.HangDetector", qos: .utility)
     private let lock = NSLock()
     private var timer: DispatchSourceTimer?
-    private var outstandingPing: Date?
-    private var hangStarted: Date?
+    /// System uptime when the ping was sent and when the hang began.
+    private var outstandingPing: TimeInterval?
+    private var hangStarted: TimeInterval?
 
     init(threshold: TimeInterval, pingInterval: TimeInterval = 0.5, markerURL: URL?,
          onHang: @escaping @Sendable (TimeInterval) -> Void) {
@@ -62,7 +66,7 @@ final class HangDetector: @unchecked Sendable {
     }
 
     private func tick() {
-        let now = Date()
+        let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         guard let sent = outstandingPing else {
             outstandingPing = now
@@ -70,14 +74,15 @@ final class HangDetector: @unchecked Sendable {
             DispatchQueue.main.async { [weak self] in self?.pong() }
             return
         }
-        let newHang = hangStarted == nil && now.timeIntervalSince(sent) > threshold
+        let newHang = hangStarted == nil && now - sent > threshold
         if newHang { hangStarted = sent }
         lock.unlock()
-        if newHang { writeMarker(started: sent) }
+        // The marker is read by a person and by the next launch, so it keeps the wall clock.
+        if newHang { writeMarker(started: Date().addingTimeInterval(sent - now)) }
     }
 
     private func pong() {
-        let now = Date()
+        let now = ProcessInfo.processInfo.systemUptime
         lock.lock()
         let started = hangStarted
         outstandingPing = nil
@@ -85,7 +90,7 @@ final class HangDetector: @unchecked Sendable {
         lock.unlock()
         guard let started else { return }
         removeMarker()
-        onHang(now.timeIntervalSince(started))
+        onHang(now - started)
     }
 
     // MARK: - Marker
